@@ -1,6 +1,7 @@
 using SkiaSharp;
 using TwitchDownloaderCore.Chat;
 using TwitchDownloaderCore.Extensions;
+using TwitchDownloaderCore.Models;
 using TwitchDownloaderCore.TwitchObjects;
 
 namespace TwitchDownloaderCore.Options
@@ -94,10 +95,28 @@ namespace TwitchDownloaderCore.Options
         public int ImageCacheMb { get; set; } = 256;
         /// <summary>Cap on a chat GIF's height, as a percentage of the chat height. 100 lets one fill the chat.</summary>
         /// <remarks>Oversized messages are clipped at the top of the frame, so this is a readability choice rather than a limit.</remarks>
-        public int GifMaxHeightPercent { get; set; } = 50;
+        public int GifMaxHeightPercent { get; set; } = 33;
         /// <summary>Render GIFs posted in chat as a full width image. Unresolvable GIFs stay as their bracketed alt text.</summary>
         public bool GiphyGifs { get; set; } = true;
         /// <summary>Number of parallel FFmpeg encoding segments to run simultaneously. 0 = automatic scaling based on CPU core count, 1 = single-process rendering.</summary>
         public int ParallelJobs { get; set; } = 0;
+
+        // v2.0-extended Broadcast & Chat Event Options
+        public OverlayWidgetMode PredictionMode { get; set; } = OverlayWidgetMode.StickyTop;
+        public OverlayWidgetMode PollMode { get; set; } = OverlayWidgetMode.StickyTop;
+        public OverlayWidgetMode PinnedChatMode { get; set; } = OverlayWidgetMode.StickyTop;
+        public OverlayWidgetMode HypeTrainMode { get; set; } = OverlayWidgetMode.ChatScroll;
+        public ModerationDisplayMode ModerationMode { get; set; } = ModerationDisplayMode.Strikethrough;
+        public bool ShowModerationNotices { get; set; } = true;
+        public bool EnableClearAll { get; set; } = false;
+        public bool ShowRoomstateNotices { get; set; } = true;
+        public bool RenderReplies { get; set; } = true;
+        public bool HighlightFirstTimeChatter { get; set; } = true;
+        public bool RenderAnnouncements { get; set; } = true;
+        public bool RenderRaidNotices { get; set; } = true;
+        public bool RenderChannelPointRedemptions { get; set; } = true;
+        public bool RenderHypeChat { get; set; } = true;
+        public bool RenderPowerUps { get; set; } = true;
+        public bool RenderSharedChatBadge { get; set; } = true;
     }
 }

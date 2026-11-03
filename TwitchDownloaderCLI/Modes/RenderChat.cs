@@ -4,6 +4,7 @@ using TwitchDownloaderCLI.Tools;
 using TwitchDownloaderCore;
 using TwitchDownloaderCore.Chat;
 using TwitchDownloaderCore.Interfaces;
+using TwitchDownloaderCore.Models;
 using TwitchDownloaderCore.Options;
 using TwitchDownloaderCore.TwitchObjects;
 
@@ -42,6 +43,29 @@ namespace TwitchDownloaderCLI.Modes
             {
                 Console.CancelKeyPress -= cancelHandler;
             }
+        }
+
+        private static OverlayWidgetMode ParseOverlayWidgetMode(string value, string optionName)
+        {
+            return (value ?? "sticky").Trim().ToLowerInvariant() switch
+            {
+                "sticky" or "stickytop" or "top" => OverlayWidgetMode.StickyTop,
+                "scroll" or "chat" or "chatscroll" => OverlayWidgetMode.ChatScroll,
+                "off" or "none" or "false" or "disabled" => OverlayWidgetMode.Off,
+                _ => throw new NotSupportedException($"Invalid {optionName} '{value}'. Valid values are: sticky, scroll, and off.")
+            };
+        }
+
+        private static ModerationDisplayMode ParseModerationMode(string value)
+        {
+            return (value ?? "strikethrough").Trim().ToLowerInvariant() switch
+            {
+                "strikethrough" or "strike" or "dim" => ModerationDisplayMode.Strikethrough,
+                "deleted" or "replacedeleted" or "replace" => ModerationDisplayMode.ReplaceDeleted,
+                "hide" or "hidden" or "remove" => ModerationDisplayMode.Hide,
+                "off" or "none" or "false" or "ignore" => ModerationDisplayMode.Off,
+                _ => throw new NotSupportedException($"Invalid --moderation-mode '{value}'. Valid values are: strikethrough, deleted, hide, and off.")
+            };
         }
 
         private static ChatRenderOptions GetRenderOptions(ChatRenderArgs inputOptions, FileCollisionHandler collisionHandler, ITaskLogger logger)
@@ -122,6 +146,22 @@ namespace TwitchDownloaderCLI.Modes
                 AlternateMessageBackgrounds = inputOptions.AlternateMessageBackgrounds,
                 AdjustUsernameVisibility = (bool)inputOptions.AdjustUsernameVisibility!,
                 ParallelJobs = inputOptions.ParallelJobs,
+                PredictionMode = ParseOverlayWidgetMode(inputOptions.PredictionMode, "--prediction-mode"),
+                PollMode = ParseOverlayWidgetMode(inputOptions.PollMode, "--poll-mode"),
+                PinnedChatMode = ParseOverlayWidgetMode(inputOptions.PinnedChatMode, "--pinned-chat-mode"),
+                HypeTrainMode = ParseOverlayWidgetMode(inputOptions.HypeTrainMode, "--hype-train-mode"),
+                ModerationMode = ParseModerationMode(inputOptions.ModerationMode),
+                ShowModerationNotices = (bool)inputOptions.ShowModerationNotices!,
+                EnableClearAll = inputOptions.EnableClearAll,
+                ShowRoomstateNotices = (bool)inputOptions.ShowRoomstateNotices!,
+                RenderReplies = (bool)inputOptions.RenderReplies!,
+                HighlightFirstTimeChatter = (bool)inputOptions.HighlightFirstTimeChatter!,
+                RenderAnnouncements = (bool)inputOptions.RenderAnnouncements!,
+                RenderRaidNotices = (bool)inputOptions.RenderRaidNotices!,
+                RenderChannelPointRedemptions = (bool)inputOptions.RenderChannelPointRedemptions!,
+                RenderHypeChat = (bool)inputOptions.RenderHypeChat!,
+                RenderPowerUps = (bool)inputOptions.RenderPowerUps!,
+                RenderSharedChatBadge = (bool)inputOptions.RenderSharedChatBadge!,
                 FileCollisionCallback = collisionHandler.HandleCollisionCallback,
             };
 

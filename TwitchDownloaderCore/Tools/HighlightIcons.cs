@@ -252,7 +252,10 @@ namespace TwitchDownloaderCore.Tools
 
         public static (Comment resubMessage, Comment customMessage) SplitSubComment(Comment comment)
         {
-            if (comment.message.fragments[0].text.Contains("! ", StringComparison.Ordinal))
+            var firstText = comment.message.fragments[0].text;
+            if (firstText.Contains("! ", StringComparison.Ordinal)
+                || firstText.Contains("They've subscribed", StringComparison.Ordinal)
+                || firstText.Contains("converted from", StringComparison.Ordinal))
             {
                 return SplitSpecialComment(comment, "! ");
             }
@@ -271,7 +274,7 @@ namespace TwitchDownloaderCore.Tools
             var systemFragmentText = comment.message.fragments[0].text;
             var splitPosition = systemFragmentText.IndexOf(splitDelim, StringComparison.Ordinal);
 
-            if (splitPosition == -1 || splitPosition + splitDelim.Length >= systemFragmentText.Length)
+            if (splitPosition == -1 || (splitPosition + splitDelim.Length >= systemFragmentText.Length && comment.message.fragments.Count == 1))
             {
                 // Suppose a viewer was not allowed to share a custom message, then there would be no delimiter
                 return (comment, null);
@@ -294,6 +297,11 @@ namespace TwitchDownloaderCore.Tools
             if (customMessage.message.fragments[0].text.Length == 0)
             {
                 customMessage.message.fragments.RemoveAt(0);
+            }
+
+            if (string.IsNullOrWhiteSpace(customMessage.message.body) && customMessage.message.fragments.Count == 0)
+            {
+                return (announcementMessage, null);
             }
 
             return (announcementMessage, customMessage);

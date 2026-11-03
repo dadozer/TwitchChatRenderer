@@ -1,4 +1,4 @@
-﻿namespace TwitchDownloaderCore.Models
+namespace TwitchDownloaderCore.Models
 {
     // TODO: Add Bzip2 and possibly 7Zip support
     public enum ChatCompression
@@ -33,5 +33,20 @@
         None,
         Landscape,
         Portrait
+    }
+
+    public enum ModerationDisplayMode
+    {
+        Strikethrough,
+        ReplaceDeleted,
+        Hide,
+        Off
+    }
+
+    public enum OverlayWidgetMode
+    {
+        StickyTop,
+        ChatScroll,
+        Off
     }
 }

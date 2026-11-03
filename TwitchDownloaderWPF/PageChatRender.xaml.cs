@@ -15,6 +15,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using TwitchDownloaderCore;
 using TwitchDownloaderCore.Chat;
+using TwitchDownloaderCore.Models;
 using TwitchDownloaderCore.Options;
 using TwitchDownloaderCore.TwitchObjects;
 using TwitchDownloaderWPF.Extensions;
@@ -65,6 +66,29 @@ namespace TwitchDownloaderWPF
                 "italic" or "italics" => "Italic",
                 "bolditalic" or "bolditalics" => "BoldItalic",
                 _ => "Normal"
+            };
+        }
+
+        private static OverlayWidgetMode ParseOverlayWidgetSelection(int selectedIndex, OverlayWidgetMode fallback)
+        {
+            return selectedIndex switch
+            {
+                0 => OverlayWidgetMode.StickyTop,
+                1 => OverlayWidgetMode.ChatScroll,
+                2 => OverlayWidgetMode.Off,
+                _ => fallback
+            };
+        }
+
+        private static ModerationDisplayMode ParseModerationSelection(int selectedIndex)
+        {
+            return selectedIndex switch
+            {
+                0 => ModerationDisplayMode.Strikethrough,
+                1 => ModerationDisplayMode.ReplaceDeleted,
+                2 => ModerationDisplayMode.Hide,
+                3 => ModerationDisplayMode.Off,
+                _ => ModerationDisplayMode.Strikethrough
             };
         }
 
@@ -158,6 +182,22 @@ namespace TwitchDownloaderWPF
                 AllowUnlistedEmotes = true,
                 DisperseCommentOffsets = checkDispersion.IsChecked.GetValueOrDefault(),
                 AdjustUsernameVisibility = checkAdjustUsernameVisibility.IsChecked.GetValueOrDefault(),
+                PredictionMode = ParseOverlayWidgetSelection(comboPredictionMode.SelectedIndex, OverlayWidgetMode.StickyTop),
+                PollMode = ParseOverlayWidgetSelection(comboPollMode.SelectedIndex, OverlayWidgetMode.StickyTop),
+                PinnedChatMode = ParseOverlayWidgetSelection(comboPinnedChatMode.SelectedIndex, OverlayWidgetMode.StickyTop),
+                HypeTrainMode = ParseOverlayWidgetSelection(comboHypeTrainMode.SelectedIndex, OverlayWidgetMode.ChatScroll),
+                ModerationMode = ParseModerationSelection(comboModerationMode.SelectedIndex),
+                ShowModerationNotices = checkModerationNotices.IsChecked.GetValueOrDefault(true),
+                EnableClearAll = checkClearAll.IsChecked.GetValueOrDefault(false),
+                ShowRoomstateNotices = checkRoomstateNotices.IsChecked.GetValueOrDefault(true),
+                RenderReplies = checkReplies.IsChecked.GetValueOrDefault(true),
+                HighlightFirstTimeChatter = checkFirstChatter.IsChecked.GetValueOrDefault(true),
+                RenderAnnouncements = checkAnnouncements.IsChecked.GetValueOrDefault(true),
+                RenderRaidNotices = checkRaids.IsChecked.GetValueOrDefault(true),
+                RenderChannelPointRedemptions = checkChannelPoints.IsChecked.GetValueOrDefault(true),
+                RenderHypeChat = checkHypeChat.IsChecked.GetValueOrDefault(true),
+                RenderPowerUps = checkPowerUps.IsChecked.GetValueOrDefault(true),
+                RenderSharedChatBadge = checkSharedChatBadge.IsChecked.GetValueOrDefault(true),
             };
             if (RadioEmojiNotoColor.IsChecked == true)
                 options.EmojiVendor = EmojiVendor.GoogleNotoColor;
@@ -226,6 +266,23 @@ namespace TwitchDownloaderWPF
                 RadioEmojiNotoColor.IsChecked = (EmojiVendor)Settings.Default.RenderEmojiVendor == EmojiVendor.GoogleNotoColor;
                 RadioEmojiTwemoji.IsChecked = (EmojiVendor)Settings.Default.RenderEmojiVendor == EmojiVendor.TwitterTwemoji;
                 RadioEmojiNone.IsChecked = (EmojiVendor)Settings.Default.RenderEmojiVendor == EmojiVendor.None;
+
+                comboPredictionMode.SelectedIndex = Math.Clamp(Settings.Default.PredictionMode, 0, 2);
+                comboPollMode.SelectedIndex = Math.Clamp(Settings.Default.PollMode, 0, 2);
+                comboPinnedChatMode.SelectedIndex = Math.Clamp(Settings.Default.PinnedChatMode, 0, 2);
+                comboHypeTrainMode.SelectedIndex = Math.Clamp(Settings.Default.HypeTrainMode, 0, 2);
+                comboModerationMode.SelectedIndex = Math.Clamp(Settings.Default.ModerationMode, 0, 3);
+                checkModerationNotices.IsChecked = Settings.Default.ShowModerationNotices;
+                checkClearAll.IsChecked = Settings.Default.EnableClearAll;
+                checkRoomstateNotices.IsChecked = Settings.Default.ShowRoomstateNotices;
+                checkReplies.IsChecked = Settings.Default.RenderReplies;
+                checkFirstChatter.IsChecked = Settings.Default.HighlightFirstTimeChatter;
+                checkAnnouncements.IsChecked = Settings.Default.RenderAnnouncements;
+                checkRaids.IsChecked = Settings.Default.RenderRaidNotices;
+                checkChannelPoints.IsChecked = Settings.Default.RenderChannelPointRedemptions;
+                checkHypeChat.IsChecked = Settings.Default.RenderHypeChat;
+                checkPowerUps.IsChecked = Settings.Default.RenderPowerUps;
+                checkSharedChatBadge.IsChecked = Settings.Default.RenderSharedChatBadge;
 
                 comboBadges.SelectedItems.Clear();
                 var badgeMask = (ChatBadgeType)Settings.Default.ChatBadgeMask;
@@ -330,6 +387,22 @@ namespace TwitchDownloaderWPF
             Settings.Default.DisperseCommentOffsets = checkDispersion.IsChecked.GetValueOrDefault();
             Settings.Default.AlternateMessageBackgrounds = checkAlternateMessageBackgrounds.IsChecked.GetValueOrDefault();
             Settings.Default.AdjustUsernameVisibility = checkAdjustUsernameVisibility.IsChecked.GetValueOrDefault();
+            Settings.Default.PredictionMode = Math.Clamp(comboPredictionMode.SelectedIndex, 0, 2);
+            Settings.Default.PollMode = Math.Clamp(comboPollMode.SelectedIndex, 0, 2);
+            Settings.Default.PinnedChatMode = Math.Clamp(comboPinnedChatMode.SelectedIndex, 0, 2);
+            Settings.Default.HypeTrainMode = Math.Clamp(comboHypeTrainMode.SelectedIndex, 0, 2);
+            Settings.Default.ModerationMode = Math.Clamp(comboModerationMode.SelectedIndex, 0, 3);
+            Settings.Default.ShowModerationNotices = checkModerationNotices.IsChecked.GetValueOrDefault(true);
+            Settings.Default.EnableClearAll = checkClearAll.IsChecked.GetValueOrDefault(false);
+            Settings.Default.ShowRoomstateNotices = checkRoomstateNotices.IsChecked.GetValueOrDefault(true);
+            Settings.Default.RenderReplies = checkReplies.IsChecked.GetValueOrDefault(true);
+            Settings.Default.HighlightFirstTimeChatter = checkFirstChatter.IsChecked.GetValueOrDefault(true);
+            Settings.Default.RenderAnnouncements = checkAnnouncements.IsChecked.GetValueOrDefault(true);
+            Settings.Default.RenderRaidNotices = checkRaids.IsChecked.GetValueOrDefault(true);
+            Settings.Default.RenderChannelPointRedemptions = checkChannelPoints.IsChecked.GetValueOrDefault(true);
+            Settings.Default.RenderHypeChat = checkHypeChat.IsChecked.GetValueOrDefault(true);
+            Settings.Default.RenderPowerUps = checkPowerUps.IsChecked.GetValueOrDefault(true);
+            Settings.Default.RenderSharedChatBadge = checkSharedChatBadge.IsChecked.GetValueOrDefault(true);
             if (comboFormat.SelectedItem != null)
             {
                 Settings.Default.VideoContainer = ((VideoContainer)comboFormat.SelectedItem).Name;
@@ -549,6 +622,25 @@ namespace TwitchDownloaderWPF
             comboFontStyle.Items.Add("Italic");
             comboFontStyle.Items.Add("BoldItalic");
             comboFontStyle.SelectedItem = "Normal";
+
+            string[] overlayChoices = ["Sticky Top", "Chat Scroll", "Off"];
+            foreach (var choice in overlayChoices)
+            {
+                comboPredictionMode.Items.Add(choice);
+                comboPollMode.Items.Add(choice);
+                comboPinnedChatMode.Items.Add(choice);
+                comboHypeTrainMode.Items.Add(choice);
+            }
+            comboPredictionMode.SelectedIndex = 0;
+            comboPollMode.SelectedIndex = 0;
+            comboPinnedChatMode.SelectedIndex = 0;
+            comboHypeTrainMode.SelectedIndex = 1;
+
+            comboModerationMode.Items.Add("Dim / Strikethrough");
+            comboModerationMode.Items.Add("Replace (<message deleted>)");
+            comboModerationMode.Items.Add("Hide Completely");
+            comboModerationMode.Items.Add("Off");
+            comboModerationMode.SelectedIndex = 0;
 
             Codec h264Codec = new Codec() { Name = "H264", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v libx264 -preset:v veryfast -crf 18 -pix_fmt yuv420p \"{save_path}\"" };
             Codec h264NvencCodec = new Codec() { Name = "H264 NVIDIA", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v h264_nvenc -preset:v p4 -cq 20 -pix_fmt yuv420p \"{save_path}\"" };

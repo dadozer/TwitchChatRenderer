@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -64,6 +64,12 @@ namespace TwitchDownloaderCore.Chat
                 returnChatRoot.FileInfo = fileInfoElement.Deserialize<ChatRootInfo>(options: _jsonSerializerOptions);
             }
 
+            if (jsonDocument.RootElement.TryGetProperty("schemaVersion", out JsonElement schemaVersionElement)
+                && schemaVersionElement.ValueKind == JsonValueKind.String)
+            {
+                returnChatRoot.schemaVersion = schemaVersionElement.GetString();
+            }
+
             if (jsonDocument.RootElement.TryGetProperty("streamer", out JsonElement streamerElement))
             {
                 returnChatRoot.streamer = streamerElement.Deserialize<Streamer>(options: _jsonSerializerOptions);
@@ -81,6 +87,12 @@ namespace TwitchDownloaderCore.Chat
                     returnChatRoot.comments = onlyFirstAndLastComments
                         ? commentsElement.DeserializeFirstAndLastFromList<Comment>(options: _jsonSerializerOptions)
                         : commentsElement.Deserialize<List<Comment>>(options: _jsonSerializerOptions);
+                }
+
+                if (!onlyFirstAndLastComments && jsonDocument.RootElement.TryGetProperty("events", out JsonElement eventsElement)
+                    && eventsElement.ValueKind == JsonValueKind.Array)
+                {
+                    returnChatRoot.events = eventsElement.Deserialize<List<ChatBroadcastEvent>>(options: _jsonSerializerOptions) ?? [];
                 }
             }
 
@@ -145,7 +157,10 @@ namespace TwitchDownloaderCore.Chat
 
             // Everything was parsed to get here, so honouring these only frees the memory again
             if (!getComments)
+            {
                 chatRoot.comments = null;
+                chatRoot.events = [];
+            }
             if (!getEmbeds)
                 chatRoot.embeddedData = null;
 
@@ -291,6 +306,21 @@ namespace TwitchDownloaderCore.Chat
                 chatRoot.video.length = UrlTimeCode.Parse(chatRoot.video.duration).TotalSeconds;
                 chatRoot.video.end = chatRoot.video.length;
                 chatRoot.video.duration = null;
+            }
+
+            foreach (var comment in chatRoot.comments)
+            {
+                if (comment.message is { bits_spent: 0 })
+                {
+                    if (comment.bits_spent > 0)
+                    {
+                        comment.message.bits_spent = comment.bits_spent;
+                    }
+                    else if (comment.event_data is { bits_spent: > 0 })
+                    {
+                        comment.message.bits_spent = comment.event_data.bits_spent;
+                    }
+                }
             }
 
             // Fix incorrect bits_spent value on chats between v5 shutdown and the lay295#520 fix

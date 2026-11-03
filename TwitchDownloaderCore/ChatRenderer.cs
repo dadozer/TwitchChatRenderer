@@ -177,6 +177,7 @@ namespace TwitchDownloaderCore
             public int AnimDirtyMaxY { get; set; } = 0;
             public long FrameVersionCounter { get; set; } = 0;
             public List<int> AnimLastFrameIndices { get; } = [];
+            public StickyOverlayTracker StickyTracker { get; init; }
 
             public void InvalidateAnimCache()
             {
@@ -268,10 +269,14 @@ namespace TwitchDownloaderCore
             _progress.SetStatus("Fetching Images [1/2]");
             await Task.Run(() => FetchScaledImages(cancellationToken), cancellationToken).ConfigureAwait(false);
 
+            RemoveRestrictedComments(chatRoot.comments);
+
             if (renderOptions.DisperseCommentOffsets)
             {
                 DisperseCommentOffsets(chatRoot.comments);
             }
+
+            PrepareExtendedEventsAndComments();
             FloorCommentOffsets(chatRoot.comments);
 
             if (ShouldUseEmbeddedInter(renderOptions.Font))
@@ -314,8 +319,6 @@ namespace TwitchDownloaderCore
 
             // Rough estimation of the width of a single block art character
             renderOptions.BlockArtCharWidth = GetFallbackFont('█', _fallbackFontCache).MeasureText("█");
-
-            RemoveRestrictedComments(chatRoot.comments);
 
             (int startTick, int totalTicks) = GetVideoTicks();
             int endTick = startTick + totalTicks;
@@ -776,54 +779,63 @@ namespace TwitchDownloaderCore
 
         /// <summary>
         /// Due to Twitch changing the API to return only whole number offsets, renders have become less readable.
-        /// To get around this we can re-evaluate comment offsets according to their creation date to help restore
-        /// the better readability of comments coming in 1-by-1.
+        /// To get around this we can re-evaluate comment offsets according to their creation date or distribute
+        /// clumped 1-second comment buckets across the second to restore smooth 1-by-1 chat flow.
         /// </summary>
         private static void DisperseCommentOffsets(List<Comment> comments)
         {
+            if (comments is null || comments.Count < 2)
+            {
+                return;
+            }
+
             var commentSpan = CollectionsMarshal.AsSpan(comments);
 
-            // ChatRoot.Video.CreatedAt lacks millisecond accuracy
+            // Check whether created_at carries genuine sub-second precision that differs from content_offset_seconds
             var minVideoCreated = DateTime.MaxValue;
             var maxVideoCreated = DateTime.MinValue;
+            bool allWholeSeconds = true;
+            bool hasSubSecondCreatedAt = false;
+
             foreach (var c in commentSpan)
             {
                 if (c.content_offset_seconds % 1 != 0)
                 {
-                    // This is an old chat with millisecond accuracy
-                    return;
+                    allWholeSeconds = false;
+                }
+
+                if (c.created_at.Ticks % TimeSpan.TicksPerSecond != 0)
+                {
+                    hasSubSecondCreatedAt = true;
                 }
 
                 var newEstimate = c.created_at - TimeSpan.FromSeconds(c.content_offset_seconds);
-
                 if (newEstimate < minVideoCreated) minVideoCreated = newEstimate;
                 if (newEstimate > maxVideoCreated) maxVideoCreated = newEstimate;
             }
 
             const double MAX_DRIFT_SECONDS = 1.5;
-            if ((maxVideoCreated - minVideoCreated).TotalSeconds < MAX_DRIFT_SECONDS)
+            double driftSeconds = (maxVideoCreated - minVideoCreated).TotalSeconds;
+            if (allWholeSeconds && hasSubSecondCreatedAt && driftSeconds > 0.01 && driftSeconds < MAX_DRIFT_SECONDS)
             {
                 foreach (var c in commentSpan)
                 {
                     var newOffset = (c.created_at - minVideoCreated).TotalSeconds;
-                    Debug.Assert(Math.Abs(newOffset - c.content_offset_seconds) < MAX_DRIFT_SECONDS);
                     c.content_offset_seconds = newOffset;
                 }
             }
-            else
-            {
-                // Comments.CreatedAt is inaccurate. Fall back to jitter approximation
-                JitterCommentOffsets(comments);
-            }
+
+            // Always disperse any remaining clumped comments that share an identical timestamp
+            // (handles VOD backfills with whole-second created_at, sliced VOD segments with constant fractional offsets,
+            // and multiple messages arriving within the same timestamp bucket).
+            JitterCommentOffsets(comments);
         }
 
         /// <summary>
-        /// Disperse the offsets of comments on each whole second across the second. For example:
+        /// Disperses clusters of comments that share an identical timestamp across the 1-second window following that timestamp.
+        /// For example:
         ///   the input a=1.0 b=2.0 c=2.0  d=2.0 e=2.0  f=3.0
         ///     becomes a=1.0 b=2.0 c=2.25 d=2.5 e=2.75 f=3.0
-        ///
-        /// The only drawback to this method is there will never be multiple comments drawn on the same tick
-        /// like in a real chat. The overall improved chat flow is still worth it regardless. */
         /// </summary>
         private static void JitterCommentOffsets(List<Comment> comments)
         {
@@ -831,32 +843,35 @@ namespace TwitchDownloaderCore
 
             for (var i = 0; i < comments.Count - 1; i++)
             {
-                if (comments[i + 1].content_offset_seconds != comments[i].content_offset_seconds
-                    || comments[i].content_offset_seconds % 1 != 0)
+                double baseOffset = comments[i].content_offset_seconds;
+                if (Math.Abs(comments[i + 1].content_offset_seconds - baseOffset) > 0.0001)
                 {
                     continue;
                 }
 
-                var startIndex = i + 1;
-                while (i < comments.Count - 1 && comments[i + 1].content_offset_seconds == comments[i].content_offset_seconds)
+                var startIndex = i;
+                while (i < comments.Count - 1 && Math.Abs(comments[i + 1].content_offset_seconds - baseOffset) <= 0.0001)
                 {
                     i++;
                 }
 
                 var scaleFactor = 1.0;
-                if (i < comments.Count - 1 && comments[i + 1].content_offset_seconds - comments[i].content_offset_seconds < 1)
+                if (i < comments.Count - 1)
                 {
-                    // If there happens to be 2+ comments on a whole second in a chat with decimal comment offsets
-                    // we don't want to inadvertently rearrange the comment order
-                    scaleFactor = comments[i + 1].content_offset_seconds - comments[i].content_offset_seconds;
+                    double gapToNext = comments[i + 1].content_offset_seconds - baseOffset;
+                    if (gapToNext > 0.0001 && gapToNext < 1.0)
+                    {
+                        // Do not rearrange comment order if the next distinct comment is less than 1 second away
+                        scaleFactor = gapToNext;
+                    }
                 }
 
-                var commentsToUpdate = i - startIndex;
-                for (var c = 1; c <= commentsToUpdate; c++) // Start at 1 so we don't offset the first comment on the second
+                var groupCount = i - startIndex + 1;
+                for (var c = 1; c < groupCount; c++) // Start at 1 so the first comment in the bucket stays at baseOffset
                 {
-                    var jitter = jitterRnd.NextDouble() * 0.98 - 0.49; // Jitter the distributed comment offset between 0.51-1.49x
-                    var distributedOffset = (c + jitter) / (commentsToUpdate + 1); // Jitter must be addition to retain comment order
-                    comments[startIndex + c].content_offset_seconds += distributedOffset * scaleFactor;
+                    var jitter = jitterRnd.NextDouble() * 0.8 - 0.4; // Jitter within [-0.4, +0.4] of slot c to preserve strict order
+                    var distributedOffset = (c + jitter) / groupCount;
+                    comments[startIndex + c].content_offset_seconds = baseOffset + distributedOffset * scaleFactor;
                 }
             }
         }
@@ -1161,11 +1176,15 @@ namespace TwitchDownloaderCore
                 ? -1
                 : GetNewestCommentIndex(-1, maxSegmentTimeSeconds);
 
+            var stickyTracker = new StickyOverlayTracker(_stickyBroadcastEvents, renderOptions);
+            stickyTracker.AdvanceTo(startTick / (double)renderOptions.Framerate);
+
             using var workerState = new RenderWorkerState
             {
                 WorkerId = workerId,
                 TotalWorkers = totalWorkers,
-                MaxCommentIndex = maxCommentIdx
+                MaxCommentIndex = maxCommentIdx,
+                StickyTracker = stickyTracker
             };
 
             var frameChannel = Channel.CreateBounded<QueuedFrame>(new BoundedChannelOptions(32)
@@ -1969,7 +1988,7 @@ namespace TwitchDownloaderCore
                 return (workerState.AnimComposedFrame, workerState.AnimComposedVersion);
             }
 
-            ComposeAnimatedFrame(workerState, updateFrame, currentFrame.Version, comments, currentTickMs, out long nextChangeTickMs);
+            ComposeAnimatedFrame(workerState, updateFrame, currentFrame.Version, comments, currentTickMs, currentFrame.StickyTopHeight, out long nextChangeTickMs);
             workerState.AnimComposedForCommentIndex = commentIndex;
             workerState.AnimNextChangeTickMs = nextChangeTickMs;
             workerState.AnimLastTickMs = currentTickMs;
@@ -1983,7 +2002,7 @@ namespace TwitchDownloaderCore
         /// only the 2x2-aligned vertical row band covering the specific animated emote(s) whose frame index advanced
         /// on this tick is restored and re-composited.
         /// </summary>
-        private void ComposeAnimatedFrame(RenderWorkerState workerState, SKBitmap updateFrame, long updateVersion, List<CommentSection> comments, long currentTickMs, out long nextChangeTickMs)
+        private void ComposeAnimatedFrame(RenderWorkerState workerState, SKBitmap updateFrame, long updateVersion, List<CommentSection> comments, long currentTickMs, int stickyTopHeight, out long nextChangeTickMs)
         {
             if (workerState.AnimComposedFrame == null)
             {
@@ -2033,10 +2052,13 @@ namespace TwitchDownloaderCore
                         if (emoteChanged)
                         {
                             var emoteImg = emote.EmoteFrames[frameIdx];
-                            int top = Math.Max(0, drawPoint.Y + frameHeight);
+                            int top = Math.Max(stickyTopHeight, drawPoint.Y + frameHeight);
                             int bottom = Math.Min(renderOptions.ChatHeight, drawPoint.Y + frameHeight + emoteImg.Height);
-                            if (top < minY) minY = top;
-                            if (bottom > maxY) maxY = bottom;
+                            if (bottom > top)
+                            {
+                                if (top < minY) minY = top;
+                                if (bottom > maxY) maxY = bottom;
+                            }
                         }
 
                         emoteIdx++;
@@ -2049,7 +2071,7 @@ namespace TwitchDownloaderCore
                 animLastFrameIndices.RemoveRange(emoteIdx, animLastFrameIndices.Count - emoteIdx);
             }
 
-            minY = Math.Max(0, minY & ~1);
+            minY = Math.Max(stickyTopHeight, minY & ~1);
             maxY = Math.Min(renderOptions.ChatHeight, (maxY + 1) & ~1);
 
             unsafe
@@ -2078,10 +2100,13 @@ namespace TwitchDownloaderCore
                 return;
             }
 
-            if (isIncremental)
+            bool hasClip = isIncremental || stickyTopHeight > 0;
+            if (hasClip)
             {
                 workerState.AnimCanvas.Save();
-                workerState.AnimCanvas.ClipRect(new SKRect(0, minY, renderOptions.ChatWidth, maxY));
+                int clipTop = isIncremental ? Math.Max(stickyTopHeight, minY) : stickyTopHeight;
+                int clipBottom = isIncremental ? maxY : renderOptions.ChatHeight;
+                workerState.AnimCanvas.ClipRect(new SKRect(0, clipTop, renderOptions.ChatWidth, clipBottom));
             }
 
             try
@@ -2098,7 +2123,7 @@ namespace TwitchDownloaderCore
                         {
                             var emoteImg = emote.EmoteFrames[animLastFrameIndices[drawEmoteIdx++]];
                             int drawY = drawPoint.Y + frameHeight;
-                            if (!isIncremental || (drawY < maxY && drawY + emoteImg.Height > minY))
+                            if (drawY + emoteImg.Height > stickyTopHeight && (!isIncremental || (drawY < maxY && drawY + emoteImg.Height > minY)))
                             {
                                 workerState.AnimCanvas.DrawImage(emoteImg, drawPoint.X, drawY);
                             }
@@ -2108,7 +2133,7 @@ namespace TwitchDownloaderCore
             }
             finally
             {
-                if (isIncremental)
+                if (hasClip)
                 {
                     workerState.AnimCanvas.Restore();
                 }
@@ -2220,8 +2245,37 @@ namespace TwitchDownloaderCore
         private UpdateFrame GenerateUpdateFrame(RenderWorkerState workerState, int currentTick, int sectionDefaultYPos, UpdateFrame lastUpdate = null)
         {
             var currentTimeSeconds = currentTick / (double)renderOptions.Framerate;
+            workerState.StickyTracker?.AdvanceTo(currentTimeSeconds);
+            var stickySig = workerState.StickyTracker?.ComputeSignature(currentTimeSeconds) ?? 0;
+
+            var anyModeratedChanged = false;
+            if (lastUpdate?.Comments is { Count: > 0 } existingComments
+                && renderOptions.ModerationMode is ModerationDisplayMode.Strikethrough or ModerationDisplayMode.ReplaceDeleted)
+            {
+                for (int i = 0; i < existingComments.Count; i++)
+                {
+                    var sec = existingComments[i];
+                    if (!sec.IsModeratedRendered
+                        && chatRoot.comments[sec.CommentIndex].ModeratedAtSeconds is double modAt
+                        && currentTimeSeconds >= modAt)
+                    {
+                        var reRendered = GenerateCommentSection(sec.CommentIndex, sectionDefaultYPos, _workerContexts.Value!, isModerated: true);
+                        if (reRendered != null)
+                        {
+                            sec.Image?.Dispose();
+                            _imageBudget.MarkDrawn(reRendered.Emotes, workerState.WorkerId);
+                            existingComments[i] = reRendered;
+                            anyModeratedChanged = true;
+                        }
+                    }
+                }
+            }
+
             var newestCommentIndex = GetNewestCommentIndex(lastUpdate?.CommentIndex ?? -1, currentTimeSeconds);
-            if (lastUpdate is not null && newestCommentIndex == lastUpdate.CommentIndex)
+            if (lastUpdate is not null
+                && newestCommentIndex == lastUpdate.CommentIndex
+                && !anyModeratedChanged
+                && stickySig == lastUpdate.StickySignature)
             {
                 return lastUpdate;
             }
@@ -2259,23 +2313,44 @@ namespace TwitchDownloaderCore
 
                 for (int currentIndex = oldCommentIndex + 1; currentIndex <= newestCommentIndex; currentIndex++)
                 {
-                    if (!workerState.PreRenderedSections.Remove(currentIndex, out var comment))
-                    {
-                        comment = GenerateCommentSection(currentIndex, sectionDefaultYPos, _workerContexts.Value!);
-                    }
+                    bool alreadyModerated = renderOptions.ModerationMode is ModerationDisplayMode.Strikethrough or ModerationDisplayMode.ReplaceDeleted
+                        && chatRoot.comments[currentIndex].ModeratedAtSeconds is double modAt
+                        && currentTimeSeconds >= modAt;
 
-                    if (comment != null)
+                    if (alreadyModerated)
                     {
-                        _imageBudget.MarkDrawn(comment.Emotes, workerState.WorkerId);
-                        commentList.Add(comment);
-                        anyCommentAdded = true;
+                        if (workerState.PreRenderedSections.Remove(currentIndex, out var unmoderated))
+                        {
+                            unmoderated?.Image?.Dispose();
+                        }
+                        var modComment = GenerateCommentSection(currentIndex, sectionDefaultYPos, _workerContexts.Value!, isModerated: true);
+                        if (modComment != null)
+                        {
+                            _imageBudget.MarkDrawn(modComment.Emotes, workerState.WorkerId);
+                            commentList.Add(modComment);
+                            anyCommentAdded = true;
+                        }
+                    }
+                    else
+                    {
+                        if (!workerState.PreRenderedSections.Remove(currentIndex, out var comment))
+                        {
+                            comment = GenerateCommentSection(currentIndex, sectionDefaultYPos, _workerContexts.Value!);
+                        }
+
+                        if (comment != null)
+                        {
+                            _imageBudget.MarkDrawn(comment.Emotes, workerState.WorkerId);
+                            commentList.Add(comment);
+                            anyCommentAdded = true;
+                        }
                     }
                 }
             }
 
             // If all new comments in this interval were filtered out (e.g. skipped sub notifications) and the frame
-            // was already initialized, no visual change occurred on screen.
-            if (!anyCommentAdded && !isNewUpdateFrame)
+            // was already initialized, no visual change occurred on screen unless moderation or sticky overlays changed.
+            if (!anyCommentAdded && !isNewUpdateFrame && !anyModeratedChanged && stickySig == lastUpdate.StickySignature)
             {
                 lastUpdate.CommentIndex = newestCommentIndex;
                 return lastUpdate;
@@ -2318,6 +2393,8 @@ namespace TwitchDownloaderCore
                 commentListIndex--;
             }
 
+            int stickyTopHeight = DrawStickyTopOverlays(frameCanvas, workerState.StickyTracker, currentTimeSeconds, _workerContexts.Value!);
+
             int removeCount = commentList.Count - commentsDrawn;
             for (int i = 0; i < removeCount; i++)
             {
@@ -2325,7 +2402,7 @@ namespace TwitchDownloaderCore
             }
             commentList.RemoveRange(0, removeCount);
 
-            if (removeCount > 0)
+            if (removeCount > 0 || anyModeratedChanged)
             {
                 PopulateOnScreenImages(commentList, workerState.PreRenderedSections, workerState.OnScreenEmoteSet);
                 if (_imageBudget.ReleaseUnusedTracked(workerState.OnScreenEmoteSet, workerState.WorkerId))
@@ -2337,6 +2414,8 @@ namespace TwitchDownloaderCore
             lastUpdate.Comments = commentList;
             lastUpdate.CommentIndex = newestCommentIndex;
             lastUpdate.HasAnimatedEmotes = hasAnimatedEmotes;
+            lastUpdate.StickyTopHeight = stickyTopHeight;
+            lastUpdate.StickySignature = stickySig;
             lastUpdate.Version = ++workerState.FrameVersionCounter;
             return lastUpdate;
         }
@@ -2370,7 +2449,7 @@ namespace TwitchDownloaderCore
             return renderOptions.BackgroundColor;
         }
 
-        private CommentSection GenerateCommentSection(int commentIndex, int sectionDefaultYPos, SectionRenderContext ctx)
+        private CommentSection GenerateCommentSection(int commentIndex, int sectionDefaultYPos, SectionRenderContext ctx, bool isModerated = false)
         {
             List<EmotePosition> emoteSectionList = new List<EmotePosition>();
             Comment comment = chatRoot.comments[commentIndex];
@@ -2380,9 +2459,15 @@ namespace TwitchDownloaderCore
             var highlightType = HighlightType.Unknown;
             defaultPos.X = renderOptions.SidePadding;
 
-            if (comment.message.user_notice_params?.msg_id != null)
+            bool isExtendedUserNotice = comment.event_type == "usernotice"
+                || !string.IsNullOrEmpty(comment.event_data?.notice_type)
+                || (comment.user_notice_params != null
+                    && comment.user_notice_params.TryGetValue("msg-id", out var extNoticeId)
+                    && extNoticeId is not "highlighted-message" and not "");
+
+            if (!isExtendedUserNotice && comment.message.user_notice_params?.msg_id != null)
             {
-                if (comment.message.user_notice_params.msg_id is not "highlighted-message" and not "sub" and not "resub" and not "subgift" and not "")
+                if (comment.message.user_notice_params.msg_id is not "highlighted-message" and not "sub" and not "resub" and not "subgift" and not "announcement" and not "raid" and not "viewermilestone" and not "submysterygift" and not "")
                 {
                     _progress.LogVerbose($"{comment._id} has invalid {nameof(comment.message.user_notice_params)}: {comment.message.user_notice_params.msg_id}.");
                     return null;
@@ -2400,54 +2485,109 @@ namespace TwitchDownloaderCore
                 }
             }
 
+            if (comment.event_data is { is_highlighted: true }
+                || string.Equals(comment.event_data?.msg_id, "highlighted-message", StringComparison.OrdinalIgnoreCase)
+                || (comment.user_notice_params != null && comment.user_notice_params.TryGetValue("msg-id", out var topMsgId) && topMsgId == "highlighted-message"))
+            {
+                highlightType = HighlightType.ChannelPointHighlight;
+            }
+
+            if (comment.message.fragments == null && comment.message.body != null)
+            {
+                comment = comment.Clone();
+                comment.message.fragments = [new Fragment { text = comment.message.body }];
+            }
+
             if (comment.message.fragments == null || comment.commenter == null)
             {
                 _progress.LogVerbose($"{comment._id} lacks fragments and/or a commenter.");
                 return null;
             }
 
+            if (isModerated && renderOptions.ModerationMode == ModerationDisplayMode.ReplaceDeleted)
+            {
+                comment = comment.Clone();
+                comment.message.body = "<message deleted>";
+                comment.message.fragments = [new Fragment { text = "<message deleted>" }];
+                comment.message.emoticons = [];
+                comment.message.bits_spent = 0;
+            }
+
             AddImageSection(sectionImages, ref drawPos, defaultPos);
             defaultPos.Y = sectionDefaultYPos;
             drawPos.Y = defaultPos.Y;
 
-            if (highlightType is HighlightType.Unknown)
+            SKColor? customAccentColor = null;
+            if (!TryDrawExtendedComment(comment, sectionImages, emoteSectionList, commentIndex, ref drawPos, ref defaultPos, ctx, out customAccentColor))
             {
-                highlightType = HighlightIcons.GetHighlightType(comment);
-            }
-
-            if (highlightType is not HighlightType.None)
-            {
-                if (highlightType is not HighlightType.ChannelPointHighlight && !renderOptions.SubMessages)
+                if (highlightType is HighlightType.Unknown)
                 {
-                    foreach (var img in sectionImages)
-                    {
-                        _sectionImageCache.Return(img);
-                    }
-                    sectionImages.Clear();
-                    return null;
+                    highlightType = HighlightIcons.GetHighlightType(comment);
                 }
 
-                // Clone accented messages before rendering so in-place substring adjustments in sub/resub/watch-streak/bits-badge
-                // handlers never mutate shared chatRoot.comments across parallel segment workers.
-                comment = comment.Clone();
-                DrawAccentedMessage(comment, sectionImages, emoteSectionList, highlightType, commentIndex, ref drawPos, defaultPos, ctx);
+                if (highlightType is not HighlightType.None)
+                {
+                    if (highlightType is not HighlightType.ChannelPointHighlight && !renderOptions.SubMessages)
+                    {
+                        foreach (var img in sectionImages)
+                        {
+                            _sectionImageCache.Return(img);
+                        }
+                        sectionImages.Clear();
+                        return null;
+                    }
+
+                    // Clone accented messages before rendering so in-place substring adjustments in sub/resub/watch-streak/bits-badge
+                    // handlers never mutate shared chatRoot.comments across parallel segment workers.
+                    comment = comment.Clone();
+                    DrawAccentedMessage(comment, sectionImages, emoteSectionList, highlightType, commentIndex, ref drawPos, defaultPos, ctx);
+                }
+                else
+                {
+                    bool hasLeftAccentBar = (renderOptions.RenderHypeChat && comment.event_data?.hype_chat != null)
+                        || (renderOptions.HighlightFirstTimeChatter && comment.event_data is { is_first_message: true } or { is_returning_chatter: true });
+
+                    if (hasLeftAccentBar)
+                    {
+                        drawPos.X += renderOptions.AccentIndentWidth - renderOptions.AccentStrokeWidth / 2;
+                        defaultPos.X = drawPos.X;
+                    }
+
+                    DrawNonAccentedMessage(comment, sectionImages, emoteSectionList, false, commentIndex, ref drawPos, ref defaultPos, ctx);
+                }
             }
-            else
+
+            int replyHeaderHeight = comment.IsSyntheticNotice ? 0 : GetReplyHeaderHeight(comment);
+            if (replyHeaderHeight > 0 && emoteSectionList.Count > 0)
             {
-                DrawNonAccentedMessage(comment, sectionImages, emoteSectionList, false, commentIndex, ref drawPos, ref defaultPos, ctx);
+                for (int i = 0; i < emoteSectionList.Count; i++)
+                {
+                    var ep = emoteSectionList[i];
+                    emoteSectionList[i] = new EmotePosition(new Point { X = ep.DrawPoint.X, Y = ep.DrawPoint.Y + replyHeaderHeight }, ep.Emote);
+                }
             }
 
             return new CommentSection
             {
-                Image = CombineImages(sectionImages, highlightType, commentIndex, ctx),
+                Image = CombineImages(sectionImages, highlightType, commentIndex, ctx, comment, replyHeaderHeight, customAccentColor, emoteSectionList, isModerated),
                 Emotes = emoteSectionList,
                 CommentIndex = commentIndex,
+                IsModeratedRendered = isModerated
             };
         }
 
-        private SKImage CombineImages(List<SectionImage> sectionImages, HighlightType highlightType, int commentIndex, SectionRenderContext ctx)
+        private SKImage CombineImages(
+            List<SectionImage> sectionImages,
+            HighlightType highlightType,
+            int commentIndex,
+            SectionRenderContext ctx,
+            Comment comment,
+            int replyHeaderHeight,
+            SKColor? customAccentColor,
+            List<EmotePosition> emoteSectionList,
+            bool isModerated)
         {
-            var totalHeight = 0;
+            var totalHeight = replyHeaderHeight;
             for (int i = 0; i < sectionImages.Count; i++)
             {
                 totalHeight += sectionImages[i].Info.Height;
@@ -2456,9 +2596,50 @@ namespace TwitchDownloaderCore
             var rentedImage = _sectionImageCache.Rent(renderOptions.ChatWidth, totalHeight);
             var bitmapInfo = rentedImage.Info;
             var canvas = rentedImage.Canvas;
+            bool hasLeftAccentBar = false;
 
-            if (highlightType is HighlightType.PayingForward or HighlightType.ChannelPointHighlight or HighlightType.WatchStreak or HighlightType.Combo)
+            if (customAccentColor.HasValue)
             {
+                hasLeftAccentBar = true;
+                var bgPaint = GetCachedPaint(customAccentColor.Value.WithAlpha(28), ctx.PaintCache);
+                canvas.DrawRect(renderOptions.SidePadding, 0, bitmapInfo.Width - renderOptions.SidePadding * 2, bitmapInfo.Height, bgPaint);
+
+                var accentPaint = GetCachedPaint(customAccentColor.Value, ctx.PaintCache);
+                canvas.DrawRect(renderOptions.SidePadding, 0, renderOptions.AccentStrokeWidth, bitmapInfo.Height, accentPaint);
+            }
+            else if (renderOptions.RenderHypeChat && comment.event_data?.hype_chat != null)
+            {
+                hasLeftAccentBar = true;
+                var hypeColor = GetHypeChatLevelColor(comment.event_data.hype_chat.level);
+                var bgPaint = GetCachedPaint(hypeColor.WithAlpha(36), ctx.PaintCache);
+                canvas.DrawRect(renderOptions.SidePadding, 0, bitmapInfo.Width - renderOptions.SidePadding * 2, bitmapInfo.Height, bgPaint);
+
+                var accentPaint = GetCachedPaint(hypeColor, ctx.PaintCache);
+                canvas.DrawRect(renderOptions.SidePadding, 0, renderOptions.AccentStrokeWidth, bitmapInfo.Height, accentPaint);
+            }
+            else if (highlightType is HighlightType.ChannelPointHighlight)
+            {
+                hasLeftAccentBar = true;
+                var highlightColor = new SKColor(0xFF6B9E82);
+                var bgPaint = GetCachedPaint(highlightColor.WithAlpha(28), ctx.PaintCache);
+                canvas.DrawRect(renderOptions.SidePadding, 0, bitmapInfo.Width - renderOptions.SidePadding * 2, bitmapInfo.Height, bgPaint);
+
+                var accentPaint = GetCachedPaint(highlightColor, ctx.PaintCache);
+                canvas.DrawRect(renderOptions.SidePadding, 0, renderOptions.AccentStrokeWidth, bitmapInfo.Height, accentPaint);
+            }
+            else if (renderOptions.HighlightFirstTimeChatter && comment.event_data is { is_first_message: true } or { is_returning_chatter: true })
+            {
+                hasLeftAccentBar = true;
+                var chatterColor = comment.event_data.is_first_message ? new SKColor(0xFFD97706) : new SKColor(0xFF00A8FC);
+                var bgPaint = GetCachedPaint(chatterColor.WithAlpha(28), ctx.PaintCache);
+                canvas.DrawRect(renderOptions.SidePadding, 0, bitmapInfo.Width - renderOptions.SidePadding * 2, bitmapInfo.Height, bgPaint);
+
+                var accentPaint = GetCachedPaint(chatterColor, ctx.PaintCache);
+                canvas.DrawRect(renderOptions.SidePadding, 0, renderOptions.AccentStrokeWidth, bitmapInfo.Height, accentPaint);
+            }
+            else if (highlightType is HighlightType.PayingForward or HighlightType.WatchStreak or HighlightType.Combo)
+            {
+                hasLeftAccentBar = true;
                 var accentColor = highlightType is HighlightType.PayingForward
                     ? new SKColor(0xFF26262C) // AARRGGBB
                     : new SKColor(0xFF80808C); // AARRGGBB
@@ -2466,8 +2647,9 @@ namespace TwitchDownloaderCore
                 var paint = GetCachedPaint(accentColor, ctx.PaintCache);
                 canvas.DrawRect(renderOptions.SidePadding, 0, renderOptions.AccentStrokeWidth, bitmapInfo.Height, paint);
             }
-            else if (highlightType is not HighlightType.None)
+            else if (highlightType is not HighlightType.None and not HighlightType.Unknown)
             {
+                hasLeftAccentBar = true;
                 const int OPAQUE_THRESHOLD = 245;
                 var messageBackground = GetMessageBackground(commentIndex, ctx.PaintCache, out _);
                 if (messageBackground.Alpha < OPAQUE_THRESHOLD)
@@ -2482,12 +2664,31 @@ namespace TwitchDownloaderCore
                 canvas.DrawRect(renderOptions.SidePadding, 0, renderOptions.AccentStrokeWidth, bitmapInfo.Height, accentPaint);
             }
 
+            if (replyHeaderHeight > 0)
+            {
+                DrawReplyHeaderOnCombinedCanvas(canvas, comment, replyHeaderHeight, hasLeftAccentBar, ctx);
+            }
+
             for (var i = 0; i < sectionImages.Count; i++)
             {
-                canvas.DrawBitmap(sectionImages[i].Bitmap, 0, i * renderOptions.SectionHeight);
+                canvas.DrawBitmap(sectionImages[i].Bitmap, 0, replyHeaderHeight + i * renderOptions.SectionHeight);
                 _sectionImageCache.Return(sectionImages[i]);
             }
             sectionImages.Clear();
+
+            if (isModerated && renderOptions.ModerationMode == ModerationDisplayMode.Strikethrough)
+            {
+                ApplyStrikethroughModeration(canvas, bitmapInfo, emoteSectionList, replyHeaderHeight);
+            }
+            else if (isModerated && renderOptions.ModerationMode == ModerationDisplayMode.ReplaceDeleted)
+            {
+                using var dimPaint = new SKPaint
+                {
+                    Color = new SKColor(0, 0, 0, 155),
+                    BlendMode = SKBlendMode.DstIn
+                };
+                canvas.DrawRect(0, 0, bitmapInfo.Width, bitmapInfo.Height, dimPaint);
+            }
 
             rentedImage.Flush();
             var finalImage = SKImage.FromBitmap(rentedImage.Bitmap);
@@ -2509,7 +2710,9 @@ namespace TwitchDownloaderCore
             {
                 DrawBadges(comment, sectionImages, ref drawPos);
             }
+            DrawSharedChatInlineBadge(comment, sectionImages, ref drawPos, ctx);
             DrawUsername(comment, sectionImages, ref drawPos, defaultPos, ctx, commentIndex: commentIndex);
+            DrawHypeChatInlinePill(comment, sectionImages, ref drawPos, defaultPos, ctx);
             DrawMessage(comment, sectionImages, emotePositionList, highlightWords, ref drawPos, defaultPos, ctx);
 
             foreach (var sectionImage in sectionImages)
@@ -2520,7 +2723,9 @@ namespace TwitchDownloaderCore
 
         private void DrawAccentedMessage(Comment comment, List<SectionImage> sectionImages, List<EmotePosition> emotePositionList, HighlightType highlightType, int commentIndex, ref Point drawPos, Point defaultPos, SectionRenderContext ctx)
         {
-            drawPos.X += renderOptions.AccentIndentWidth;
+            drawPos.X += highlightType is HighlightType.ChannelPointHighlight
+                ? renderOptions.AccentIndentWidth - renderOptions.AccentStrokeWidth / 2
+                : renderOptions.AccentIndentWidth;
             defaultPos.X = drawPos.X;
 
             var highlightIcon = highlightIcons.GetHighlightIcon(highlightType, ctx.MessageFont.Color);
@@ -2549,14 +2754,14 @@ namespace TwitchDownloaderCore
                 case HighlightType.GiftedMany:
                 case HighlightType.GiftedSingle:
                 case HighlightType.GiftedAnonymous:
+                case HighlightType.ContinuingGift:
                 case HighlightType.ContinuingAnonymousGift:
+                case HighlightType.PayingForward:
                     DrawGiftMessage(comment, sectionImages, emotePositionList, ref drawPos, defaultPos, highlightIcon, iconPoint, ctx);
                     break;
                 case HighlightType.ChannelPointHighlight:
-                    DrawNonAccentedMessage(comment, sectionImages, emotePositionList, true, commentIndex, ref drawPos, ref defaultPos, ctx);
+                    DrawNonAccentedMessage(comment, sectionImages, emotePositionList, false, commentIndex, ref drawPos, ref defaultPos, ctx);
                     break;
-                case HighlightType.ContinuingGift:
-                case HighlightType.PayingForward:
                 case HighlightType.Raid:
                 case HighlightType.Combo:
                 default:
@@ -2572,38 +2777,46 @@ namespace TwitchDownloaderCore
 
         private void DrawSubscribeMessage(Comment comment, List<SectionImage> sectionImages, List<EmotePosition> emotePositionList, int commentIndex, ref Point drawPos, Point defaultPos, SKImage highlightIcon, Point iconPoint, SectionRenderContext ctx)
         {
-            var canvas = sectionImages[^1].Canvas;
-            canvas.DrawImage(highlightIcon, iconPoint.X, iconPoint.Y);
-
             Point customMessagePos = drawPos;
-            drawPos.X += highlightIcon.Width + renderOptions.WordSpacing;
-            defaultPos.X = drawPos.X;
-
-            DrawUsername(comment, sectionImages, ref drawPos, defaultPos, ctx, false, Purple);
-            AddImageSection(sectionImages, ref drawPos, defaultPos);
 
             // Remove the commenter's name from the resub message
-            comment.message.body = comment.message.body[(comment.commenter.display_name.Length + 1)..];
-            if (comment.message.fragments[0].text.Equals(comment.commenter.display_name, StringComparison.OrdinalIgnoreCase))
+            if (comment.message.body.Length > comment.commenter.display_name.Length + 1
+                && comment.message.body.StartsWith(comment.commenter.display_name, StringComparison.OrdinalIgnoreCase))
             {
-                // Some older chat replays separate user names into separate fragments
-                comment.message.fragments.RemoveAt(0);
-            }
-            else
-            {
-                comment.message.fragments[0].text = comment.message.fragments[0].text[(comment.commenter.display_name.Length + 1)..];
+                comment.message.body = comment.message.body[(comment.commenter.display_name.Length + 1)..];
+                if (comment.message.fragments[0].text.Equals(comment.commenter.display_name, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Some older chat replays separate user names into separate fragments
+                    comment.message.fragments.RemoveAt(0);
+                }
+                else if (comment.message.fragments[0].text.Length > comment.commenter.display_name.Length + 1)
+                {
+                    comment.message.fragments[0].text = comment.message.fragments[0].text[(comment.commenter.display_name.Length + 1)..];
+                }
             }
 
             var (resubMessage, customResubMessage) = HighlightIcons.SplitSubComment(comment);
-            DrawMessage(resubMessage, sectionImages, emotePositionList, false, ref drawPos, defaultPos, ctx);
+            bool hasCustomMessage = customResubMessage is not null
+                && (!string.IsNullOrWhiteSpace(customResubMessage.message?.body) || customResubMessage.message?.fragments is { Count: > 0 });
+
+            string compactSummary = BuildCompactSubSummary(comment, resubMessage.message?.body ?? "");
+            DrawCompactSubOrStreakHeaderLine(
+                comment,
+                sectionImages,
+                ref drawPos,
+                highlightIcon,
+                iconPoint,
+                compactSummary,
+                includeUsername: !hasCustomMessage,
+                ctx);
 
             // Return if there is no custom resub message to draw
-            if (customResubMessage is null)
+            if (!hasCustomMessage)
             {
                 return;
             }
 
-            AddImageSection(sectionImages, ref drawPos, defaultPos);
+            AddImageSection(sectionImages, ref drawPos, customMessagePos);
             drawPos = customMessagePos;
             defaultPos = customMessagePos;
             DrawNonAccentedMessage(customResubMessage, sectionImages, emotePositionList, false, commentIndex, ref drawPos, ref defaultPos, ctx);
@@ -2646,38 +2859,46 @@ namespace TwitchDownloaderCore
 
         private void DrawWatchStreakMessage(Comment comment, List<SectionImage> sectionImages, List<EmotePosition> emotePositionList, int commentIndex, ref Point drawPos, Point defaultPos, SKImage highlightIcon, Point iconPoint, SectionRenderContext ctx)
         {
-            var canvas = sectionImages[^1].Canvas;
-            canvas.DrawImage(highlightIcon, iconPoint.X, iconPoint.Y);
-
             Point customMessagePos = drawPos;
-            drawPos.X += highlightIcon.Width + renderOptions.WordSpacing;
-            defaultPos.X = drawPos.X;
-
-            DrawUsername(comment, sectionImages, ref drawPos, defaultPos, ctx, false, Purple);
-            AddImageSection(sectionImages, ref drawPos, defaultPos);
 
             // Remove the commenter's name from the watch streak message
-            comment.message.body = comment.message.body[(comment.commenter.display_name.Length + 1)..];
-            if (comment.message.fragments[0].text.Equals(comment.commenter.display_name, StringComparison.OrdinalIgnoreCase))
+            if (comment.message.body.Length > comment.commenter.display_name.Length + 1
+                && comment.message.body.StartsWith(comment.commenter.display_name, StringComparison.OrdinalIgnoreCase))
             {
-                // This is necessary for sub messages. We'll keep it around just in case.
-                comment.message.fragments.RemoveAt(0);
-            }
-            else
-            {
-                comment.message.fragments[0].text = comment.message.fragments[0].text[(comment.commenter.display_name.Length + 1)..];
+                comment.message.body = comment.message.body[(comment.commenter.display_name.Length + 1)..];
+                if (comment.message.fragments[0].text.Equals(comment.commenter.display_name, StringComparison.OrdinalIgnoreCase))
+                {
+                    // This is necessary for sub messages. We'll keep it around just in case.
+                    comment.message.fragments.RemoveAt(0);
+                }
+                else if (comment.message.fragments[0].text.Length > comment.commenter.display_name.Length + 1)
+                {
+                    comment.message.fragments[0].text = comment.message.fragments[0].text[(comment.commenter.display_name.Length + 1)..];
+                }
             }
 
             var (streakMessage, customMessage) = HighlightIcons.SplitWatchStreakComment(comment);
-            DrawMessage(streakMessage, sectionImages, emotePositionList, false, ref drawPos, defaultPos, ctx);
+            bool hasCustomMessage = customMessage is not null
+                && (!string.IsNullOrWhiteSpace(customMessage.message?.body) || customMessage.message?.fragments is { Count: > 0 });
+
+            string compactSummary = BuildCompactWatchStreakSummary(comment, streakMessage.message?.body ?? "");
+            DrawCompactSubOrStreakHeaderLine(
+                comment,
+                sectionImages,
+                ref drawPos,
+                highlightIcon,
+                iconPoint,
+                compactSummary,
+                includeUsername: !hasCustomMessage,
+                ctx);
 
             // Return if there is no custom message to draw
-            if (customMessage is null)
+            if (!hasCustomMessage)
             {
                 return;
             }
 
-            AddImageSection(sectionImages, ref drawPos, defaultPos);
+            AddImageSection(sectionImages, ref drawPos, customMessagePos);
             drawPos = customMessagePos;
             defaultPos = customMessagePos;
             DrawNonAccentedMessage(customMessage, sectionImages, emotePositionList, false, commentIndex, ref drawPos, ref defaultPos, ctx);
@@ -2703,12 +2924,7 @@ namespace TwitchDownloaderCore
 
         private void DrawGiftMessage(Comment comment, List<SectionImage> sectionImages, List<EmotePosition> emotePositionList, ref Point drawPos, Point defaultPos, SKImage highlightIcon, Point iconPoint, SectionRenderContext ctx)
         {
-            var canvas = sectionImages[^1].Canvas;
-
-            canvas.DrawImage(highlightIcon, iconPoint.X, iconPoint.Y);
-            drawPos.X += highlightIcon.Width + renderOptions.AccentIndentWidth - renderOptions.AccentStrokeWidth;
-            defaultPos.X = drawPos.X;
-            DrawMessage(comment, sectionImages, emotePositionList, false, ref drawPos, defaultPos, ctx);
+            DrawCompactGiftMessageLine(comment, comment.message?.body ?? "", sectionImages, ref drawPos, highlightIcon, iconPoint, ctx);
         }
 
         private static readonly SearchValues<char> WhiteSpaceChars = SearchValues.Create("\t\n\v\f\r\u0020\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000");
@@ -2736,7 +2952,7 @@ namespace TwitchDownloaderCore
             {
                 if (fragment.emoticon != null)
                 {
-                    DrawFirstPartyEmote(sectionImages, emotePositionList, ref drawPos, defaultPos, fragment, highlightWords, ctx);
+                    DrawFirstPartyEmote(comment, sectionImages, emotePositionList, ref drawPos, defaultPos, fragment, highlightWords, ctx);
                     continue;
                 }
 
@@ -3206,32 +3422,62 @@ namespace TwitchDownloaderCore
             return false;
         }
 
-        private void DrawFirstPartyEmote(List<SectionImage> sectionImages, List<EmotePosition> emotePositionList, ref Point drawPos, Point defaultPos, Fragment fragment, bool highlightWords, SectionRenderContext ctx)
+        private void DrawFirstPartyEmote(Comment comment, List<SectionImage> sectionImages, List<EmotePosition> emotePositionList, ref Point drawPos, Point defaultPos, Fragment fragment, bool highlightWords, SectionRenderContext ctx)
         {
             // First party emote
             var emoteLookup = _emoteCache.GetAlternateLookup<ReadOnlySpan<char>>();
             if (emoteLookup.TryGetValue(fragment.emoticon.emoticon_id, out var emote))
             {
+                bool isGigantified = IsGigantifiedEmoteFragment(comment, fragment, renderOptions);
+                if (isGigantified)
+                {
+                    emote = GetOrCreateGigantifiedEmote(emote);
+                }
+
                 SKImageInfo emoteInfo = emote.Info;
                 if (drawPos.X + emoteInfo.Width > renderOptions.ChatWidth - renderOptions.SidePadding * 2)
                 {
                     AddImageSection(sectionImages, ref drawPos, defaultPos);
                 }
-                Point emotePoint = new Point
-                {
-                    X = drawPos.X,
-                    Y = (int)((sectionImages.Count - 1) * renderOptions.SectionHeight + ((renderOptions.SectionHeight - emoteInfo.Height) / 2.0))
-                };
 
-                if (highlightWords)
+                Point emotePoint;
+                if (isGigantified && emoteInfo.Height > renderOptions.SectionHeight)
                 {
-                    var canvas = sectionImages[^1].Canvas;
-                    var paint = GetCachedPaint(Purple, ctx.PaintCache);
-                    canvas.DrawRect(drawPos.X, 0, emoteInfo.Width + renderOptions.EmoteSpacing, renderOptions.SectionHeight, paint);
+                    int emoteX = drawPos.X;
+                    int startSectionIdx = sectionImages.Count - 1;
+                    int sectionsSpanned = Math.Max(1, (int)Math.Ceiling(emoteInfo.Height / (double)renderOptions.SectionHeight));
+                    for (int s = 1; s < sectionsSpanned; s++)
+                    {
+                        AddImageSection(sectionImages, ref drawPos, defaultPos);
+                    }
+
+                    int spanHeight = sectionsSpanned * renderOptions.SectionHeight;
+                    emotePoint = new Point
+                    {
+                        X = emoteX,
+                        Y = (int)(startSectionIdx * renderOptions.SectionHeight + ((spanHeight - emoteInfo.Height) / 2.0))
+                    };
+                    drawPos.X = emoteX + emoteInfo.Width + renderOptions.EmoteSpacing;
+                }
+                else
+                {
+                    emotePoint = new Point
+                    {
+                        X = drawPos.X,
+                        Y = (int)((sectionImages.Count - 1) * renderOptions.SectionHeight + ((renderOptions.SectionHeight - emoteInfo.Height) / 2.0))
+                    };
+
+                    if (highlightWords)
+                    {
+                        var canvas = sectionImages[^1].Canvas;
+                        var paint = GetCachedPaint(Purple, ctx.PaintCache);
+                        canvas.DrawRect(drawPos.X, 0, emoteInfo.Width + renderOptions.EmoteSpacing, renderOptions.SectionHeight, paint);
+                    }
+
+                    drawPos.X += emoteInfo.Width + renderOptions.EmoteSpacing;
                 }
 
                 emotePositionList.Add(new EmotePosition(emotePoint, emote));
-                drawPos.X += emoteInfo.Width + renderOptions.EmoteSpacing;
             }
             else
             {
@@ -3983,6 +4229,11 @@ namespace TwitchDownloaderCore
                     _emoteCache.Dispose();
                     _emoteThirdCache.Dispose();
                     _gifCache.Dispose();
+                    foreach (var giant in _gigantifiedEmoteCache.Values)
+                    {
+                        giant?.Dispose();
+                    }
+                    _gigantifiedEmoteCache.Clear();
                     _cheermoteCache.Dispose();
                     _emojiCache.Dispose();
                     _avatarCache.Dispose();

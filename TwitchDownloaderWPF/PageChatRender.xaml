@@ -108,7 +108,7 @@
                             <CheckBox x:Name="checkRenderAvatars" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
                             <CheckBox x:Name="checkOffline" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
                             <CheckBox x:Name="checkGiphyGifs" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
-                            <TextBox x:Name="textGifMaxHeight" Text="50" Width="50" HorizontalAlignment="Left" Margin="0,7,0,0" Background="{DynamicResource AppElementBackground}" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}"/>
+                            <TextBox x:Name="textGifMaxHeight" Text="33" Width="50" HorizontalAlignment="Left" Margin="0,7,0,0" Background="{DynamicResource AppElementBackground}" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}"/>
                             <TextBox x:Name="textImageCacheMb" Text="256" Width="50" HorizontalAlignment="Left" Margin="0,7,0,0" Background="{DynamicResource AppElementBackground}" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}"/>
                         </StackPanel>
                         <StackPanel Orientation="Vertical" Margin="20,10,0,5">
@@ -134,6 +134,57 @@
                                 <RadioButton x:Name="RadioEmojiTwemoji" Content="Twitter Twemoji" Margin="3,0,0,0" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}" />
                                 <RadioButton x:Name="RadioEmojiNone" Content="None (System Font)" Margin="3,0,0,0" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}" />
                             </WrapPanel>
+                        </StackPanel>
+                    </DockPanel>
+                </StackPanel>
+            </TabItem>
+            <TabItem Header="Events &amp; Overlays" Background="{DynamicResource AppBackground}" Foreground="{DynamicResource AppText}">
+                <StackPanel>
+                    <Separator Margin="0" />
+                    <DockPanel Background="{DynamicResource AppBackground}">
+                        <StackPanel Orientation="Vertical" Margin="5,10,5,5">
+                            <TextBlock Text="Predictions:" ToolTip="How Channel Point Predictions are displayed (Sticky Top overlay, Chat Scroll notice, or Off)." HorizontalAlignment="Right" Margin="0,5,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Polls:" ToolTip="How Polls are displayed (Sticky Top overlay, Chat Scroll notice, or Off)." HorizontalAlignment="Right" Margin="0,19,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Pinned Chat:" ToolTip="How Pinned Chat messages and Hype Pins are displayed." HorizontalAlignment="Right" Margin="0,19,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Hype Train:" ToolTip="How Hype Trains are displayed (defaults to Chat Scroll)." HorizontalAlignment="Right" Margin="0,19,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Moderation Mode:" ToolTip="How timed-out, banned, or deleted messages are rendered." HorizontalAlignment="Right" Margin="0,19,0,0" Foreground="{DynamicResource AppText}"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Vertical" Margin="0,10,10,5">
+                            <ComboBox x:Name="comboPredictionMode" MinWidth="135" HorizontalAlignment="Left" Background="{DynamicResource AppElementBackground}" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}"/>
+                            <ComboBox x:Name="comboPollMode" MinWidth="135" HorizontalAlignment="Left" Margin="0,7,0,0" Background="{DynamicResource AppElementBackground}" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}"/>
+                            <ComboBox x:Name="comboPinnedChatMode" MinWidth="135" HorizontalAlignment="Left" Margin="0,7,0,0" Background="{DynamicResource AppElementBackground}" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}"/>
+                            <ComboBox x:Name="comboHypeTrainMode" MinWidth="135" HorizontalAlignment="Left" Margin="0,7,0,0" Background="{DynamicResource AppElementBackground}" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}"/>
+                            <ComboBox x:Name="comboModerationMode" MinWidth="165" HorizontalAlignment="Left" Margin="0,7,0,0" Background="{DynamicResource AppElementBackground}" BorderBrush="{DynamicResource AppElementBorder}" Foreground="{DynamicResource AppText}"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Vertical" Margin="10,10,5,5">
+                            <TextBlock Text="Moderation Notices:" ToolTip="Insert a compact system notice when a user is timed out, banned, or has a message deleted." HorizontalAlignment="Right" Margin="0,0,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Clear All Chat:" ToolTip="Apply Moderation Mode to all prior messages when a moderator clears the entire chat room." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Roomstate Notices:" ToolTip="Insert compact system notices when emote-only, sub-only, slow, followers-only, or R9K mode changes." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Threaded Replies:" ToolTip="Render compact single-line reply context above reply messages." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="First / Returning Chatter:" ToolTip="Highlight First-Time Chatter and Returning Chatter messages." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Shared Chat Badge:" ToolTip="Render a small inline Shared Chat badge on messages from another participating channel." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Vertical" Margin="0,10,10,5">
+                            <CheckBox x:Name="checkModerationNotices" HorizontalAlignment="Left" Margin="0,0,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkClearAll" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkRoomstateNotices" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkReplies" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkFirstChatter" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkSharedChatBadge" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Vertical" Margin="10,10,5,5">
+                            <TextBlock Text="Announcements:" ToolTip="Render moderator /announce messages with their accent color bar." HorizontalAlignment="Right" Margin="0,0,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Raid Notices:" ToolTip="Render incoming and outgoing raid notices." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Channel Points:" ToolTip="Render custom Channel Point reward redemptions." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Paid Hype Chat:" ToolTip="Render Paid Hype Chat currency pill and row tint." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                            <TextBlock Text="Bits Power-Ups:" ToolTip="Render Bits Power-Ups such as Gigantified Emotes." HorizontalAlignment="Right" Margin="0,6,0,0" Foreground="{DynamicResource AppText}"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Vertical" Margin="0,10,0,5">
+                            <CheckBox x:Name="checkAnnouncements" HorizontalAlignment="Left" Margin="0,0,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkRaids" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkChannelPoints" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkHypeChat" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
+                            <CheckBox x:Name="checkPowerUps" HorizontalAlignment="Left" Margin="0,6,0,0" BorderBrush="{DynamicResource AppElementBorder}"/>
                         </StackPanel>
                     </DockPanel>
                 </StackPanel>

@@ -48,7 +48,7 @@ namespace TwitchDownloaderCLI.Modes.Arguments
         [Option("giphy", Default = true, HelpText = "Enable Giphy GIFs posted in chat, fetched from Giphy when not embedded in the input json. Unresolved GIFs stay as their bracketed alt text.")]
         public bool? GiphyGifs { get; set; }
 
-        [Option("gif-max-height-percent", Default = 50, HelpText = "Cap on the height of a GIF posted in chat, as a percentage of the chat height. 100 lets one GIF fill the chat.")]
+        [Option("gif-max-height-percent", Default = 33, HelpText = "Cap on the height of a GIF posted in chat, as a percentage of the chat height. 100 lets one GIF fill the chat.")]
         public int GifMaxHeightPercent { get; set; }
 
         [Option("image-cache-mb", Default = 256, HelpText = "Megabytes of off-screen emote and GIF imagery to retain decoded. On-screen images are always kept. Lower it on constrained machines, raise it to re-decode less often.")]
@@ -179,6 +179,54 @@ namespace TwitchDownloaderCLI.Modes.Arguments
 
         [Option('j', "jobs", Default = 0, HelpText = "Number of parallel FFmpeg encoding segments to run simultaneously. 0 = automatic scaling based on CPU core count (typically 2-3 workers), 1 = single-process rendering.")]
         public int ParallelJobs { get; set; }
+
+        [Option("prediction-mode", Default = "sticky", HelpText = "How to render Channel Point Predictions from v2.0-extended logs. Valid values are 'sticky' (top overlay), 'scroll' (chat messages), and 'off'.")]
+        public string PredictionMode { get; set; }
+
+        [Option("poll-mode", Default = "sticky", HelpText = "How to render Polls from v2.0-extended logs. Valid values are 'sticky' (top overlay), 'scroll' (chat messages), and 'off'.")]
+        public string PollMode { get; set; }
+
+        [Option("pinned-chat-mode", Default = "sticky", HelpText = "How to render Pinned Chat messages from v2.0-extended logs. Valid values are 'sticky' (top overlay), 'scroll' (chat messages), and 'off'.")]
+        public string PinnedChatMode { get; set; }
+
+        [Option("hype-train-mode", Default = "scroll", HelpText = "How to render Hype Trains from v2.0-extended logs. Valid values are 'sticky' (top overlay), 'scroll' (chat messages), and 'off'.")]
+        public string HypeTrainMode { get; set; }
+
+        [Option("moderation-mode", Default = "strikethrough", HelpText = "How to handle moderated messages (timeouts, bans, deleted messages) in v2.0-extended logs. Valid values are 'strikethrough' (dim and strikethrough at moderation time), 'deleted' (replace with <message deleted>), 'hide' (never render), and 'off'.")]
+        public string ModerationMode { get; set; }
+
+        [Option("moderation-notices", Default = true, HelpText = "Show compact system notices in chat when a user is timed out, banned, or has a message deleted.")]
+        public bool? ShowModerationNotices { get; set; }
+
+        [Option("clear-all", Default = false, HelpText = "Enable applying moderation mode to all prior messages when a moderator clears the entire chat room.")]
+        public bool EnableClearAll { get; set; }
+
+        [Option("roomstate-notices", Default = true, HelpText = "Show compact system notices in chat when room modes change (emote-only, sub-only, slow, followers-only, R9K).")]
+        public bool? ShowRoomstateNotices { get; set; }
+
+        [Option("replies", Default = true, HelpText = "Render compact threaded reply headers above reply messages.")]
+        public bool? RenderReplies { get; set; }
+
+        [Option("first-chatter", Default = true, HelpText = "Highlight First-Time Chatter and Returning Chatter messages.")]
+        public bool? HighlightFirstTimeChatter { get; set; }
+
+        [Option("announcements", Default = true, HelpText = "Render moderator /announce messages with their accent color bar.")]
+        public bool? RenderAnnouncements { get; set; }
+
+        [Option("raids", Default = true, HelpText = "Render incoming and outgoing raid notices.")]
+        public bool? RenderRaidNotices { get; set; }
+
+        [Option("channel-points", Default = true, HelpText = "Render custom Channel Point reward redemptions in chat.")]
+        public bool? RenderChannelPointRedemptions { get; set; }
+
+        [Option("hype-chat", Default = true, HelpText = "Render Paid Hype Chat currency badges and row highlights.")]
+        public bool? RenderHypeChat { get; set; }
+
+        [Option("power-ups", Default = true, HelpText = "Render Bits Power-Up effects such as Gigantified Emotes.")]
+        public bool? RenderPowerUps { get; set; }
+
+        [Option("shared-chat-badge", Default = true, HelpText = "Render a small inline Shared Chat badge on messages originating from another channel in a Shared Chat session.")]
+        public bool? RenderSharedChatBadge { get; set; }
 
         // Interface args
         public OverwriteBehavior OverwriteBehavior { get; set; }

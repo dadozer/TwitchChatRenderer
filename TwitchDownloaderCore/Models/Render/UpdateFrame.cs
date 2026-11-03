@@ -10,5 +10,7 @@ namespace TwitchDownloaderCore.Models.Render
         public int CommentIndex { get; set; }
         public bool HasAnimatedEmotes { get; set; }
         public long Version { get; set; }
+        public int StickyTopHeight { get; set; }
+        public long StickySignature { get; set; }
     }
 }

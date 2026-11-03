@@ -49,7 +49,7 @@ Built by Gemini 4 Argon.
 - **Giphy GIF Chat Rendering (`--giphy`, `--gif-max-height-percent`)**:
   - Automatically detects bracketed Giphy GIFs posted in Twitch chat (e.g., `[Horse Stare GIF by Jan Metternich]`).
   - Resolves GIFs 8-at-a-time via Giphy search (cached globally in `giphy/resolved.json.gz`) or reads pre-embedded GIF data from the JSON archive, rendering them full-width on their own line below the username.
-  - Configurable maximum height cap (`--gif-max-height-percent`, default `50%` of chat height).
+  - Configurable maximum height cap (`--gif-max-height-percent`, default `33%` of chat height).
 - **Lazy Frame Decoding & LRU Memory Budget (`--image-cache-mb`)**:
   - Decodes emote and GIF frames lazily on first draw rather than upfront at startup.
   - Enforces a configurable off-screen LRU memory budget (`--image-cache-mb`, default `256` MB) that evicts off-screen frames while keeping active visible animations resident in RAM.
@@ -59,9 +59,18 @@ Built by Gemini 4 Argon.
   - Bundles the complete **Inter** font family (`Inter Embedded`). Passing `--font Inter` automatically checks if `"Inter"` is installed in the host OS font catalog and seamlessly falls back to the embedded Inter typeface instead of defaulting to Arial or Segoe UI.
 - **Automatic WebM VP9 Alpha Optimization**:
   - Automatically detects `libvpx-vp9` with `yuva420p` and configures row-based multithreading (`-row-mt 1`), speed tuning (`-cpu-used 8`), lookahead (`-lag-in-frames 25`, `-auto-alt-ref 1`), and timeline-friendly keyframe intervals (`-g <fps*8>`) for smooth timeline scrubbing in Premiere Pro, DaVinci Resolve, and Wondershare Filmora.
+- **Extended Chat & Broadcast Event Schema (`v2.0-extended`)**:
+  - Full support for live EventSub/IRC enriched `comments[]` and timeline `events[]` alongside 100% backward compatibility with standard TwitchDownloader `.json` files.
+  - **Top Overlay Widgets (`StickyTop` | `ChatScroll` | `Off`)**: Render Predictions, Polls (with full-width vertical choice progress rows), Pinned Chat, and Hype Trains either as compact Twitch-authentic sticky headers (coexisting up to 25% of canvas height with priority ordering: *Open/Resolved Prediction > Poll > Pinned Chat > Locked Prediction > Hype Train*, lingering 15s on resolution) or as 1-line scrolling chat notifications.
+  - **Compact 1-Line Sub, Gift Sub & Watch Streak Headers**:
+    - **Subscriptions & Resubs**: Compacted to a single auto-fitted header row (`(Crown) [Username •] Prime/Tier X Sub • # Months • # Month Streak`) above the chat message, omitting the duplicate header username whenever a chat message follows.
+    - **Gift Subscriptions**: Compacted to a single auto-fitted row (`(Gift) Gifter • Gifted # Tier X Subs • # Total` for community mystery gifts, `(Gift) Gifter → Recipient • Tier X Gift Sub` with a vector right-arrow for single-recipient gifts, and `Gifter • Continuing Gift Sub` for continuing gifts).
+    - **Watch Streaks**: Compacted to a single auto-fitted header row (`(Flame) [Username •] # Stream Watch Streak!`).
+  - **Dynamic Timestamp-Accurate Moderation (`clearchat` & `clearmsg`)**: Messages appear normally when sent and dynamically transition to dimmed + strikethrough (`Strikethrough`, default) or `<message deleted>` (`ReplaceDeleted`) at the exact moderation timestamp, accompanied by optional 1-line moderation notices (`"user was timed out for 600s."`).
+  - **Unified Left Accent Bars & Rich Chat Elements**: Consistent left accent bar thickness (`AccentStrokeWidth`), indentation (`AccentIndentWidth`), and subtle `28`-alpha (~11% opacity) row tints across `/announce` banners (`BLUE`, `GREEN`, `ORANGE`, `PURPLE`, `PRIMARY`), Channel Point Highlighted Messages (gray-green `#6B9E82`), First-Time Chatters (gold `#FFB800`), Returning Chatters (sky blue `#00C8FF`), Paid Hype Chat inline currency pills, compact single-line threaded replies (`↱ @Parent: ...`), raid notices, channel point redemptions, gigantified `2.0x` emotes, baseline-aware roomstate mode notices, and inline Shared Chat badges.
 - **Streamlined `ChatRenderGUI.exe` (Windows WPF Desktop App)**:
   - Launches directly into the **Chat Render** workspace with a real-time SkiaSharp live preview.
-  - Removes non-render clutter (VOD/Clip downloaders, chat updaters, queue popups, localization/theme bloat).
+  - Includes a dedicated **Events & Overlays** configuration tab to customize or disable every `v2.0-extended` widget, moderation behavior, and chat enrichment.
   - Adds a **Parallel Segments (`0 = Auto`)** control on the Encoding tab and supports **Direct Multi-File Batch Rendering** when selecting multiple `.json` / `.json.gz` files via **Browse**.
 
 ---
@@ -72,8 +81,24 @@ Built by Gemini 4 Argon.
 | :--- | :--- | :--- |
 | `-j`, `--jobs <int>` | `0` (Auto) | Number of parallel FFmpeg encoding segments (`0` = auto-scale by CPU cores, codec, and duration; `1` = single-stream; `2`–`16` = explicit parallel segments stitched losslessly via `ffmpeg -f concat -c copy`). |
 | `--giphy <bool>` | `true` | Render bracketed Giphy GIFs (`[Title GIF by Author]`) posted in chat. |
-| `--gif-max-height-percent <int>` | `50` | Maximum height of a rendered GIF as a percentage of total chat height (`10`–`100`). |
+| `--gif-max-height-percent <int>` | `33` | Maximum height of a rendered GIF as a percentage of total chat height (`1`–`100`). |
 | `--image-cache-mb <int>` | `256` | Memory budget in MB for off-screen decoded emote/GIF frames before LRU eviction. |
+| `--prediction-mode <mode>` | `StickyTop` | How to render Twitch Predictions (`StickyTop`, `ChatScroll`, `Off`). |
+| `--poll-mode <mode>` | `StickyTop` | How to render Twitch Polls (`StickyTop`, `ChatScroll`, `Off`). |
+| `--pinned-chat-mode <mode>` | `StickyTop` | How to render Pinned Chat messages (`StickyTop`, `ChatScroll`, `Off`). |
+| `--hype-train-mode <mode>` | `ChatScroll` | How to render Hype Train events (`StickyTop`, `ChatScroll`, `Off`). |
+| `--moderation-mode <mode>` | `Strikethrough` | How moderated messages are rendered (`Strikethrough`, `ReplaceDeleted`, `Hide`, `Off`). |
+| `--moderation-notices <bool>` | `true` | Insert 1-line moderation notices in chat scroll when a user is timed out, banned, or has a message deleted. |
+| `--clear-all <bool>` | `false` | Apply moderation mode to all prior messages when a moderator clears the entire chat (`clear_all`). |
+| `--roomstate-notices <bool>` | `true` | Show 1-line notices when chat room modes change (Slow, Sub-Only, Emote-Only, Follower-Only, R9K). |
+| `--replies <bool>` | `true` | Render compact 1-line threaded reply headers (`↱ @Parent: ...`) above reply messages. |
+| `--first-chatter <bool>` | `true` | Highlight first-time and returning chatter messages with a subtle left accent bar. |
+| `--announcements <bool>` | `true` | Render `/announce` moderator banners with Twitch colored accent bars. |
+| `--raids <bool>` | `true` | Render incoming raid system notifications in chat scroll. |
+| `--channel-points <bool>` | `true` | Render channel point custom reward redemptions with reward background highlights. |
+| `--hype-chat <bool>` | `true` | Render paid Hype Chat inline currency pills and subtle row tints. |
+| `--power-ups <bool>` | `true` | Render Bits Power-Up effects such as `2.0x` gigantified emotes. |
+| `--shared-chat-badge <bool>` | `true` | Render a small inline badge on messages originating from a partner channel during Shared Chat. |
 
 ---
 

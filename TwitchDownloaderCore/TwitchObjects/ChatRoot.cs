@@ -144,6 +144,19 @@ namespace TwitchDownloaderCore.TwitchObjects
     {
         public string msg_id { get; set; }
 
+        [JsonPropertyName("msg-id")]
+        public string msg_id_hyphen
+        {
+            get => null;
+            set
+            {
+                if (string.IsNullOrEmpty(msg_id))
+                {
+                    msg_id = value;
+                }
+            }
+        }
+
         public UserNoticeParams Clone()
         {
             return new UserNoticeParams()
@@ -151,6 +164,181 @@ namespace TwitchDownloaderCore.TwitchObjects
                 msg_id = msg_id
             };
         }
+    }
+
+    public class CommentReplyInfo
+    {
+        public string parent_msg_id { get; set; }
+        public string parent_user_id { get; set; }
+        public string parent_user_login { get; set; }
+        public string parent_display_name { get; set; }
+        public string parent_msg_body { get; set; }
+        public string thread_parent_msg_id { get; set; }
+        public string thread_user_login { get; set; }
+
+        public CommentReplyInfo Clone()
+        {
+            return new CommentReplyInfo
+            {
+                parent_msg_id = parent_msg_id,
+                parent_user_id = parent_user_id,
+                parent_user_login = parent_user_login,
+                parent_display_name = parent_display_name,
+                parent_msg_body = parent_msg_body,
+                thread_parent_msg_id = thread_parent_msg_id,
+                thread_user_login = thread_user_login
+            };
+        }
+    }
+
+    public class CommentPowerUpInfo
+    {
+        public string type { get; set; }
+        public string emote_id { get; set; }
+        public string animation_id { get; set; }
+
+        public CommentPowerUpInfo Clone()
+        {
+            return new CommentPowerUpInfo
+            {
+                type = type,
+                emote_id = emote_id,
+                animation_id = animation_id
+            };
+        }
+    }
+
+    public class CommentHypeChatInfo
+    {
+        public int amount { get; set; }
+        public int exponent { get; set; }
+        public double DecimalAmount { get; set; }
+        public string currency { get; set; }
+        public string level { get; set; }
+        public bool is_system_message { get; set; }
+
+        [JsonIgnore]
+        public double EffectiveDecimalAmount =>
+            DecimalAmount > 0 ? DecimalAmount : (amount > 0 ? amount / Math.Pow(10, Math.Max(0, exponent)) : 0);
+
+        public CommentHypeChatInfo Clone()
+        {
+            return new CommentHypeChatInfo
+            {
+                amount = amount,
+                exponent = exponent,
+                DecimalAmount = DecimalAmount,
+                currency = currency,
+                level = level,
+                is_system_message = is_system_message
+            };
+        }
+    }
+
+    public class CommentSharedChatInfo
+    {
+        public string source_room_id { get; set; }
+        public string source_msg_id { get; set; }
+        public string source_badges { get; set; }
+
+        public CommentSharedChatInfo Clone()
+        {
+            return new CommentSharedChatInfo
+            {
+                source_room_id = source_room_id,
+                source_msg_id = source_msg_id,
+                source_badges = source_badges
+            };
+        }
+    }
+
+    public class CommentEventData
+    {
+        public string msg_id { get; set; }
+        public bool is_first_message { get; set; }
+        public bool is_returning_chatter { get; set; }
+        public bool is_highlighted { get; set; }
+        public bool is_subscriber { get; set; }
+        public bool is_mod { get; set; }
+        public bool is_vip { get; set; }
+        public int bits_spent { get; set; }
+        public string custom_reward_id { get; set; }
+        public CommentReplyInfo reply { get; set; }
+        public CommentPowerUpInfo power_up { get; set; }
+        public CommentHypeChatInfo hype_chat { get; set; }
+        public CommentSharedChatInfo shared_chat { get; set; }
+
+        // USERNOTICE fields
+        public string notice_type { get; set; }
+        public string system_message { get; set; }
+        public string user_message { get; set; }
+        public string sub_plan { get; set; }
+        public string sub_plan_name { get; set; }
+        public int? cumulative_months { get; set; }
+        public int? streak_months { get; set; }
+        public string recipient_id { get; set; }
+        public string recipient_user_name { get; set; }
+        public string recipient_display_name { get; set; }
+        public int? mass_gift_count { get; set; }
+        public int? sender_total_gifts { get; set; }
+        public int? raid_viewer_count { get; set; }
+        public string raid_display_name { get; set; }
+        public string announcement_color { get; set; }
+        public string milestone_category { get; set; }
+        public int? milestone_value { get; set; }
+        public int? milestone_reward { get; set; }
+        [JsonPropertyName("params")]
+        public Dictionary<string, string> notice_params { get; set; }
+
+        public CommentEventData Clone()
+        {
+            return new CommentEventData
+            {
+                msg_id = msg_id,
+                is_first_message = is_first_message,
+                is_returning_chatter = is_returning_chatter,
+                is_highlighted = is_highlighted,
+                is_subscriber = is_subscriber,
+                is_mod = is_mod,
+                is_vip = is_vip,
+                bits_spent = bits_spent,
+                custom_reward_id = custom_reward_id,
+                reply = reply?.Clone(),
+                power_up = power_up?.Clone(),
+                hype_chat = hype_chat?.Clone(),
+                shared_chat = shared_chat?.Clone(),
+                notice_type = notice_type,
+                system_message = system_message,
+                user_message = user_message,
+                sub_plan = sub_plan,
+                sub_plan_name = sub_plan_name,
+                cumulative_months = cumulative_months,
+                streak_months = streak_months,
+                recipient_id = recipient_id,
+                recipient_user_name = recipient_user_name,
+                recipient_display_name = recipient_display_name,
+                mass_gift_count = mass_gift_count,
+                sender_total_gifts = sender_total_gifts,
+                raid_viewer_count = raid_viewer_count,
+                raid_display_name = raid_display_name,
+                announcement_color = announcement_color,
+                milestone_category = milestone_category,
+                milestone_value = milestone_value,
+                milestone_reward = milestone_reward,
+                notice_params = notice_params != null ? new Dictionary<string, string>(notice_params) : null
+            };
+        }
+    }
+
+    public class ChatBroadcastEvent
+    {
+        public string _id { get; set; }
+        public string created_at { get; set; }
+        public double content_offset_seconds { get; set; }
+        public string source { get; set; }
+        public string event_type { get; set; }
+        public bool carried_over { get; set; }
+        public System.Text.Json.JsonElement data { get; set; }
     }
 
     [DebuggerDisplay("{commenter} {message}")]
@@ -163,7 +351,26 @@ namespace TwitchDownloaderCore.TwitchObjects
         public string content_id { get; set; }
         public double content_offset_seconds { get; set; }
         public Commenter commenter { get; set; }
+        public string source { get; set; }
+        public string state { get; set; }
+        public int bits_spent { get; set; }
         public Message message { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public Dictionary<string, string> user_notice_params { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string event_type { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public CommentEventData event_data { get; set; }
+
+        // Runtime rendering metadata (not serialized to JSON)
+        [JsonIgnore]
+        public double? ModeratedAtSeconds { get; set; }
+        [JsonIgnore]
+        public bool IsSyntheticNotice { get; set; }
+        [JsonIgnore]
+        public bool IsSyntheticCompactNotice { get; set; }
+        [JsonIgnore]
+        public uint? SyntheticAccentColor { get; set; }
 
         public Comment Clone()
         {
@@ -176,7 +383,17 @@ namespace TwitchDownloaderCore.TwitchObjects
                 content_id = content_id,
                 content_offset_seconds = content_offset_seconds,
                 commenter = commenter?.Clone(),
-                message = message?.Clone()
+                source = source,
+                state = state,
+                bits_spent = bits_spent,
+                message = message?.Clone(),
+                user_notice_params = user_notice_params != null ? new Dictionary<string, string>(user_notice_params) : null,
+                event_type = event_type,
+                event_data = event_data?.Clone(),
+                ModeratedAtSeconds = ModeratedAtSeconds,
+                IsSyntheticNotice = IsSyntheticNotice,
+                IsSyntheticCompactNotice = IsSyntheticCompactNotice,
+                SyntheticAccentColor = SyntheticAccentColor
             };
         }
     }
@@ -280,10 +497,14 @@ namespace TwitchDownloaderCore.TwitchObjects
     public class ChatRoot
     {
         public ChatRootInfo FileInfo { get; set; } = new();
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string schemaVersion { get; set; }
         public Streamer streamer { get; set; }
         public Clipper clipper { get; set; }
         public Video video { get; set; }
         public List<Comment> comments { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<ChatBroadcastEvent> events { get; set; } = new();
         public EmbeddedData embeddedData { get; set; }
     }
 }

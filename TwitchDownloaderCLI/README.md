@@ -19,6 +19,7 @@ A high-performance, 100% drop-in compatible command-line tool engineered to rend
   - [Emotes, Badges & Giphy GIFs](#emotes-badges--giphy-gifs)
   - [Fine-Grained Layout & Element Scaling](#fine-grained-layout--element-scaling)
   - [Chat Moderation & Filtering](#chat-moderation--filtering)
+  - [Events, Overlays & Extended Schema (`v2.0-extended`)](#events-overlays--extended-schema-v20-extended)
   - [FFmpeg & Video Encoding Arguments](#ffmpeg--video-encoding-arguments)
   - [System & Temporary Paths](#system--temporary-paths)
 - [Mode: `ffmpeg`](#mode-ffmpeg)
@@ -149,7 +150,7 @@ Arguments available across all modes.
 
 #### `--dispersion`
 - **Type**: `bool` (Default: `false`)
-- In late 2022, Twitch API timestamps began truncating chat messages to whole seconds. Enabling `--dispersion` uses sub-second comment metadata to disperse message timestamps across the second they were sent. Requires `--update-rate` < 1.0.
+- Disperses whole-second bucketed chat messages evenly across the 1-second window `[S, S + 1.0)` so 1s-chunked VOD backfill logs and truncated-timestamp archives scroll smoothly at sub-second intervals (works automatically with the default `--update-rate 0.2`).
 
 ---
 
@@ -271,8 +272,8 @@ Arguments available across all modes.
 - Enables rendering of embedded or linked Giphy GIFs posted in Twitch chat (e.g., `[Horse Stare GIF by Jan Metternich]`). GIFs are displayed full-width below the username.
 
 #### `--gif-max-height-percent` *(NEW)*
-- **Type**: `int` (Default: `50`)
-- Caps the rendered height of a GIF as a percentage of the total `--chat-height`. A value of `50` ensures a GIF never occupies more than half of the visible chat window; `100` allows full-height GIFs.
+- **Type**: `int` (Default: `33`)
+- Caps the rendered height of a GIF as a percentage of the total `--chat-height`. A value of `33` ensures a GIF never occupies more than a third of the visible chat window; `100` allows full-height GIFs.
 
 #### `--image-cache-mb` *(NEW)*
 - **Type**: `int` (Default: `256`)
@@ -280,7 +281,11 @@ Arguments available across all modes.
 
 #### `--sub-messages`
 - **Type**: `bool` (Default: `true`)
-- Enables rendering of subscription and re-subscription announcement notices and highlight bars.
+- Enables rendering of compact 1-line subscription, resubscription, gift subscription, and watch streak headers with left accent bars:
+  - **Subs & Resubs**: `(Crown Icon) [Username •] Prime/Tier X Sub • # Months • # Month Streak` (omits the header username when a chat message follows on the next line).
+  - **Mystery / Community Gift Subs**: `(Gift Box Icon) Gifter • Gifted # Tier X Subs • # Total`
+  - **Single-Recipient Gift Subs**: `(Gift Icon) Gifter → Recipient • Tier X Gift Sub`
+  - **Watch Streaks**: `(Flame Icon) [Username •] # Stream Watch Streak!`
 
 #### `--badges`
 - **Type**: `bool` (Default: `true`)
@@ -343,6 +348,102 @@ Customize visual spacing, padding, and proportions with multiplier floats (Defau
 - **Type**: `string` (Default: `""`)
 - Comma-separated list of usernames whose comments will be rendered with the `--highlight-user-color` background.
 - Example: `--highlight-users "Broadcaster,VIPUser"`
+
+---
+
+### Events, Overlays & Extended Schema (`v2.0-extended`)
+
+Supports the **VOD Automator Extended Chat & Broadcast Event Schema (`v2.0-extended`)** while maintaining 100% compatibility with standard TwitchDownloader `.json` files. Every extended feature can be individually configured or disabled.
+
+#### Top Overlay Widgets (`StickyTop` | `ChatScroll` | `Off`)
+
+Top overlay widgets can be rendered as sticky headers at the top of the video frame (`StickyTop`), injected as compact 1-line state-transition messages into the scrolling chat feed (`ChatScroll`), or disabled entirely (`Off`).
+- **Coexistence & Priority Rule**: Multiple `StickyTop` widgets can coexist stacked at the top of the canvas if their combined height is **$\le 25\%$ of `--chat-height`**. If they exceed 25% of the frame height, higher-priority widgets are shown first in this exact order:
+  1. **Open (`ACTIVE`) or Resolved (`RESOLVED` / `CANCELED`) Prediction**
+  2. **Poll (`ACTIVE` or `COMPLETED` / `TERMINATED`)**
+  3. **Pinned Chat (`pin-message` / `update-message`)**
+  4. **Closed / Pending (`LOCKED`) Prediction**
+  5. **Hype Train**
+- **Linger Duration**: Resolved predictions and completed polls remain visible in the sticky overlay for **15 seconds** (highlighting the winning outcome) before automatically dismissing.
+
+##### `--prediction-mode`
+- **Type**: `OverlayWidgetMode` (Default: `StickyTop`)
+- Controls how Twitch Predictions (`events[]` with `type == "prediction"`) are displayed. Valid values: `StickyTop`, `ChatScroll`, `Off`.
+
+##### `--poll-mode`
+- **Type**: `OverlayWidgetMode` (Default: `StickyTop`)
+- Controls how Twitch Polls (`events[]` with `type == "poll"`) are displayed. Valid values: `StickyTop`, `ChatScroll`, `Off`. In `StickyTop` mode, each poll choice is stacked vertically on its own full-width progress bar row so option titles and percentages remain completely readable.
+
+##### `--pinned-chat-mode`
+- **Type**: `OverlayWidgetMode` (Default: `StickyTop`)
+- Controls how moderator Pinned Chat messages (`events[]` with `type == "pinned_chat"`) are displayed. Valid values: `StickyTop`, `ChatScroll`, `Off`.
+
+##### `--hype-train-mode`
+- **Type**: `OverlayWidgetMode` (Default: `ChatScroll`)
+- Controls how Hype Train events (`events[]` with `type == "hype_train"`) are displayed. Valid values: `StickyTop`, `ChatScroll`, `Off`.
+
+#### Dynamic Moderation & Roomstate Notices
+
+##### `--moderation-mode`
+- **Type**: `ModerationDisplayMode` (Default: `Strikethrough`)
+- Controls how messages targeted by `clearchat` (ban/timeout) or `clearmsg` (single message deletion) events are rendered:
+  - `Strikethrough` (**Default**): Renders the message normally when originally sent, then dynamically dims (~45% opacity) and draws a horizontal strikethrough across the message at the exact `content_offset_seconds` when the moderation action occurred.
+  - `ReplaceDeleted`: Renders the message normally when sent, then dynamically replaces its body with `<message deleted>` at the moderation event's timestamp.
+  - `Hide`: Omits moderated messages from the render entirely.
+  - `Off`: Ignores moderation dimming/deletion and leaves messages untouched.
+
+##### `--moderation-notices`
+- **Type**: `bool` (Default: `true`)
+- Inserts a compact 1-line gray notice into the chat scroll when a moderation event occurs (e.g., `"toxicuser was timed out for 600s."`, `"toxicuser was permanently banned."`, `"A message from chattername was deleted."`).
+
+##### `--clear-all`
+- **Type**: `bool` (Default: `false`)
+- When enabled, a `clearchat` event with `action == "clear_all"` applies `--moderation-mode` to all messages sent at or before that timestamp and logs `"Chat was cleared by a moderator."` if `--moderation-notices` is enabled.
+
+##### `--roomstate-notices`
+- **Type**: `bool` (Default: `true`)
+- Inserts compact 1-line gray notices into the chat scroll when roomstate modes change (`emote_only`, `subs_only`, `slow_seconds`, `followers_only_minutes`, `r9k`). The initial channel-join `ROOMSTATE` baseline snapshot (at stream or segment start) and partial-packet default flags are automatically suppressed so only genuine mid-stream mode changes appear.
+
+#### Enriched Chat Message Features
+
+All accented message types share a unified left accent bar thickness (`AccentStrokeWidth`), consistent text indentation (`AccentIndentWidth`), and subtle `28`-alpha (~11% opacity) row background tints:
+- **Subscriptions, Gift Subs, Watch Streaks, Raids & `PRIMARY` Announcements**: Twitch Purple (`#7B2CF2` / `#9146FF`) bar + 11% tint.
+- **Channel Point Highlighted Messages (`channel-points-highlighted`)**: Sage Gray-Green (`#6B9E82`) bar + 11% tint.
+- **First-Time Chatter (`first_msg`)**: Gold (`#FFB800`) bar + 11% tint.
+- **Returning Chatter (`returning_chatter`)**: Sky Blue (`#00C8FF`) bar + 11% tint.
+- **Moderator `/announce` Banners**: `BLUE` (`#0099FF`), `GREEN` (`#00DB84`), `ORANGE` (`#FFB31A`), `PURPLE` (`#9146FF`), or `PRIMARY` (`#7B2CF2`) bar + 11% tint.
+
+##### `--replies`
+- **Type**: `bool` (Default: `true`)
+- Renders a compact, single-line truncated reply header with a vector reply turn-arrow (`↱ @ParentDisplayName: parent message...`) directly above the username of threaded reply comments (`event_data.reply`), indented cleanly past any left accent bar.
+
+##### `--first-chatter`
+- **Type**: `bool` (Default: `true`)
+- Highlights messages from first-time chatters (`first_msg == true`, gold `#FFB800` accent) and returning chatters (sky blue `#00C8FF` accent) with a full-thickness left accent bar and 11% row tint (`0px` extra vertical height).
+
+##### `--announcements`
+- **Type**: `bool` (Default: `true`)
+- Renders moderator `/announce` notices (`event_type == "announcement"`) with their corresponding Twitch accent bar (`BLUE`, `GREEN`, `ORANGE`, `PURPLE`, or `PRIMARY`).
+
+##### `--raids`
+- **Type**: `bool` (Default: `true`)
+- Renders incoming raid notifications (`event_type == "raid"` or `events[]` with `type == "raid"`) as accented system rows in the chat scroll.
+
+##### `--channel-points`
+- **Type**: `bool` (Default: `true`)
+- Renders channel point custom reward redemptions (`channel_points_custom_reward_redemption` or `custom-reward-id`) with a compact reward title header and custom `reward_background_color` tint, and renders `"Highlight My Message"` redemptions with a sage gray-green (`#6B9E82`) left accent bar and 11% tint.
+
+##### `--hype-chat`
+- **Type**: `bool` (Default: `true`)
+- Renders paid Hype Chat messages (`event_data.hype_chat`) with a tier-colored left accent bar, inline currency pill (`$5.00`, `¥500`, etc.), and 11% row tint (`0px` extra vertical height).
+
+##### `--power-ups`
+- **Type**: `bool` (Default: `true`)
+- Renders Bits Power-Up effects (`event_data.power_up`), including scaling the target emote in `"gigantified-emote-message"` comments to `2.0x` size across multiple vertical sections while keeping normal emotes inline.
+
+##### `--shared-chat-badge`
+- **Type**: `bool` (Default: `true`)
+- Renders a small inline Shared Chat badge (`⇄`) next to the user's badges when a message originates from a partner channel during a Twitch Shared Chat session (`0px` extra vertical height).
 
 ---
 

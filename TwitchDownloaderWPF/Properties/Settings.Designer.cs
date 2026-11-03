@@ -1127,7 +1127,7 @@ namespace TwitchDownloaderWPF.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("50")]
+        [global::System.Configuration.DefaultSettingValueAttribute("33")]
         public int GifMaxHeightPercent {
             get {
                 return ((int)(this["GifMaxHeightPercent"]));
@@ -1158,6 +1158,198 @@ namespace TwitchDownloaderWPF.Properties {
             }
             set {
                 this["FontStyle"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public int PredictionMode {
+            get {
+                return ((int)(this["PredictionMode"]));
+            }
+            set {
+                this["PredictionMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public int PollMode {
+            get {
+                return ((int)(this["PollMode"]));
+            }
+            set {
+                this["PollMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public int PinnedChatMode {
+            get {
+                return ((int)(this["PinnedChatMode"]));
+            }
+            set {
+                this["PinnedChatMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("1")]
+        public int HypeTrainMode {
+            get {
+                return ((int)(this["HypeTrainMode"]));
+            }
+            set {
+                this["HypeTrainMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public int ModerationMode {
+            get {
+                return ((int)(this["ModerationMode"]));
+            }
+            set {
+                this["ModerationMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool ShowModerationNotices {
+            get {
+                return ((bool)(this["ShowModerationNotices"]));
+            }
+            set {
+                this["ShowModerationNotices"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool EnableClearAll {
+            get {
+                return ((bool)(this["EnableClearAll"]));
+            }
+            set {
+                this["EnableClearAll"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool ShowRoomstateNotices {
+            get {
+                return ((bool)(this["ShowRoomstateNotices"]));
+            }
+            set {
+                this["ShowRoomstateNotices"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool RenderReplies {
+            get {
+                return ((bool)(this["RenderReplies"]));
+            }
+            set {
+                this["RenderReplies"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool HighlightFirstTimeChatter {
+            get {
+                return ((bool)(this["HighlightFirstTimeChatter"]));
+            }
+            set {
+                this["HighlightFirstTimeChatter"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool RenderAnnouncements {
+            get {
+                return ((bool)(this["RenderAnnouncements"]));
+            }
+            set {
+                this["RenderAnnouncements"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool RenderRaidNotices {
+            get {
+                return ((bool)(this["RenderRaidNotices"]));
+            }
+            set {
+                this["RenderRaidNotices"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool RenderChannelPointRedemptions {
+            get {
+                return ((bool)(this["RenderChannelPointRedemptions"]));
+            }
+            set {
+                this["RenderChannelPointRedemptions"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool RenderHypeChat {
+            get {
+                return ((bool)(this["RenderHypeChat"]));
+            }
+            set {
+                this["RenderHypeChat"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool RenderPowerUps {
+            get {
+                return ((bool)(this["RenderPowerUps"]));
+            }
+            set {
+                this["RenderPowerUps"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool RenderSharedChatBadge {
+            get {
+                return ((bool)(this["RenderSharedChatBadge"]));
+            }
+            set {
+                this["RenderSharedChatBadge"] = value;
             }
         }
     }

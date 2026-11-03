@@ -19,15 +19,21 @@ It preserves the full TwitchDownloader **Chat Render** visual configurator and r
    - When multiple files are loaded, clicking **Render** prompts you once for an **Output Folder** (`OpenFolderDialog`) and sequentially renders each chat file (`<input_name>.<ext>`) using your configured settings, updating progress and supporting clean cancellation (automatically terminating child FFmpeg processes and cleaning up `.chatrender` temp files) at any time.
 5. **Partial Timeline Rendering**:
    - Use the split **Render** button dropdown -> **Partial Render** to render a specific start/end timestamp window (`HH:MM:SS`) of a chat archive.
-6. **Real-Time SkiaSharp Live Preview**:
-   - The right-hand **LIVE PREVIEW** panel renders a live SkiaSharp canvas preview (including a transparency checkerboard for alpha channels) that updates immediately whenever you change font family, font size, colors, outlines, timestamps, alternating backgrounds, avatars, badges, or layout scaling.
+6. **Extended Broadcast & Chat Event Schema (`v2.0-extended`)**:
+   - Full GUI configuration in the **Events & Overlays** tab for Twitch Predictions, Polls, Pinned Chat, Hype Trains, dynamic message moderation (`Strikethrough`, `ReplaceDeleted`, `Hide`, `Off`), roomstate changes, threaded replies, first-time chatter highlights, `/announce` banners, raids, channel point redemptions, Hype Chat pills, gigantified emotes, and Shared Chat badges.
+7. **Real-Time SkiaSharp Live Preview**:
+   - The right-hand **LIVE PREVIEW** panel renders a live SkiaSharp canvas preview (including a transparency checkerboard for alpha channels) that updates immediately whenever you change font family, font size, font style, colors, outlines, timestamps, alternating backgrounds, avatars, badges, or layout scaling.
 
 ---
 
 ## Configuration Tabs Overview
 
-- **General**: Canvas width (`Width`), height (`Height`), font family (`Font`), font size (`Font Size`), base/alternate/message/highlight colors, timestamps, outlines, and subscription notices.
+- **General**: Canvas width (`Width`), height (`Height`), font family (`Font`), font size (`Font Size`), font style (`Normal`, `Bold`, `Italic`, `Bold Italic`), base/alternate/message/highlight colors, timestamps, outlines, and subscription notices.
 - **Rendering**: Toggle **BTTV**, **FFZ**, **7TV**, **Giphy GIFs**, **Unlisted 7TV Emotes**, **Avatars**, **Chat Badges**, **Emoji Vendor** (`Google Noto Color`, `Twitter Twemoji`, or `None`), **Offline Mode**, **Dispersion**, **GIF Max Height (%)** (`5`–`100%`), and **Image Cache (MB)** (`0 = Unlimited`, up to `16384` MB). Filter specific badges via the **Filter Chat Badges** checklist or hide/highlight specific users and banned words.
+- **Events & Overlays**:
+  - **Top Overlay Widgets**: Independently set **Predictions** (default `Sticky Top`), **Polls** (default `Sticky Top`, with full-width vertically stacked choice rows), **Pinned Chat** (default `Sticky Top`), and **Hype Train** (default `Chat Scroll`) to `Sticky Top`, `Chat Scroll`, or `Off`. Sticky widgets coexist up to 25% of the frame height and prioritize *Open/Resolved Prediction > Poll > Pinned Chat > Closed Prediction > Hype Train*, lingering 15s after resolution.
+  - **Moderation & Roomstate**: Choose **Moderated Messages** behavior (`Dim & Strikethrough` default, `Replace with <message deleted>`, `Hide Completely`, or `Off`), toggle **Show Moderation System Notices** (default `On`), toggle **Apply Clear All** (default `Off`), and toggle **Show Roomstate Mode Notices** (default `On`, automatically suppressing initial channel-join baseline snapshots).
+  - **Chat Enrichments & Compact Sub/Gift/Streak Headers**: Individually toggle **Threaded Replies (`↱ @User`)**, **First-Time / Returning Chatter Highlight** (`#FFB800` gold / `#00C8FF` sky blue accent bar + 11% tint), **Announcements (`/announce`)**, **Raid Notices**, **Channel Point Redemptions** (including `#6B9E82` gray-green highlighted messages), **Paid Hype Chat Pill**, **Bits Power-Ups / Gigantified Emotes**, and **Shared Chat Small Badge** (all default `On`), alongside compact 1-line Subscription, Gift Subscription (`Gifter → Recipient`), and Watch Streak headers.
 - **Scaling**: Fine-grained multipliers (`0.1x` – `4.0x`) for Emotes, Badges, Emojis, Avatars, Vertical Spacing, Side Padding, Section Height, Word Space, Emote Space, Accent Stroke, Accent Indent, and Username Scale.
 - **Encoding**: Container format (`MP4`, `MOV`, `WEBM`, `MKV`), Video Codec (`H264`, `H264 NVIDIA`, `H265`, `H265 NVIDIA`, `VP8`, `VP9`, `ProRes 4444`, `RLE`), Framerate (`FPS`), Update Rate, **Parallel Segments (`0 = Auto`)**, Alpha Mask generation (`Generate Mask`), Sharpening, and custom FFmpeg input/output arguments.
 

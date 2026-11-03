@@ -30,6 +30,8 @@ Non-render subsystems (`videodownload`, `clipdownload`, `chatdownload`, `chatupd
   - Resolves `--font Inter` to the bundled `Inter Embedded` typeface when `"Inter"` is not installed on the host OS.
 - **>2 GB Streaming Chat JSON Deserialization**:
   - Automatically streams multi-gigabyte `.json` and `.json.gz` archives.
+- **Extended Chat & Broadcast Event Schema (`v2.0-extended`) & Compact Notices**:
+  - Supports sticky top overlays (Predictions, vertically stacked Poll bars, Pinned Chat, Hype Trains), dynamic timestamp-accurate moderation (`Strikethrough` / `ReplaceDeleted`), compact 1-line Sub, Gift Sub (`Gifter → Recipient`), and Watch Streak headers, unified left accent bars with `28`-alpha row tints, and baseline-aware roomstate notices.
 
 ---
 
