@@ -101,6 +101,8 @@ namespace TwitchDownloaderCore
         {
             private readonly List<ChatBroadcastEvent> _events;
             private readonly ChatRenderOptions _options;
+            private readonly Dictionary<string, double> _pollCompletedAtById = new(StringComparer.Ordinal);
+            private readonly Dictionary<string, double> _predictionResolvedAtById = new(StringComparer.Ordinal);
             private int _eventCursor = 0;
 
             public ActivePredictionState Prediction { get; private set; }
@@ -118,7 +120,9 @@ namespace TwitchDownloaderCore
             {
                 while (_eventCursor < _events.Count && _events[_eventCursor].content_offset_seconds <= currentTimeSeconds + 0.0001)
                 {
-                    ApplyEvent(_events[_eventCursor]);
+                    var ev = _events[_eventCursor];
+                    ExpireStaleStates(ev.content_offset_seconds);
+                    ApplyEvent(ev);
                     _eventCursor++;
                 }
 
@@ -158,6 +162,29 @@ namespace TwitchDownloaderCore
                 int windowSec = GetJsonInt(d, "prediction_window_seconds", 120);
                 string winningId = GetJsonString(d, "winning_outcome_id");
 
+                bool isEndedStatus = status is "RESOLVED" or "CANCELED";
+
+                // Ignore carried-over predictions at the start of a sliced VOD if they are already resolved/canceled
+                if (ev.carried_over && isEndedStatus)
+                {
+                    if (!string.IsNullOrEmpty(predId))
+                    {
+                        _predictionResolvedAtById.TryAdd(predId, -STICKY_RESOLVED_LINGER_SECONDS);
+                    }
+                    return;
+                }
+
+                // If this prediction already resolved earlier, preserve its original resolution timestamp and ignore post-linger updates
+                double? priorResolvedAt = null;
+                if (!string.IsNullOrEmpty(predId) && _predictionResolvedAtById.TryGetValue(predId, out double recordedResAt))
+                {
+                    if (ev.content_offset_seconds - recordedResAt >= STICKY_RESOLVED_LINGER_SECONDS)
+                    {
+                        return;
+                    }
+                    priorResolvedAt = recordedResAt;
+                }
+
                 var outcomes = new List<ActivePredictionOutcome>();
                 if (d.TryGetProperty("outcomes", out var outcomesEl) && outcomesEl.ValueKind == JsonValueKind.Array)
                 {
@@ -176,11 +203,16 @@ namespace TwitchDownloaderCore
 
                 bool isSamePrediction = Prediction != null && string.Equals(Prediction.PredictionId, predId, StringComparison.Ordinal);
                 double startedOffset = isSamePrediction ? Prediction.StartedOffsetSeconds : ev.content_offset_seconds;
-                double? resolvedOffset = isSamePrediction ? Prediction.ResolvedOffsetSeconds : null;
+                double? resolvedOffset = priorResolvedAt ?? (isSamePrediction ? Prediction.ResolvedOffsetSeconds : null);
 
-                if (status is "RESOLVED" or "CANCELED" && resolvedOffset is null)
+                if (isEndedStatus && resolvedOffset is null)
                 {
                     resolvedOffset = ev.content_offset_seconds;
+                }
+
+                if (resolvedOffset is double resVal && !string.IsNullOrEmpty(predId))
+                {
+                    _predictionResolvedAtById.TryAdd(predId, resVal);
                 }
 
                 Prediction = new ActivePredictionState
@@ -204,12 +236,46 @@ namespace TwitchDownloaderCore
                 string pubsubType = (GetJsonString(d, "pubsub_type") ?? "").ToUpperInvariant();
                 string status = (GetJsonString(d, "status") ?? "ACTIVE").ToUpperInvariant();
 
-                // When POLL_ARCHIVE arrives right after POLL_COMPLETE, preserve the COMPLETED state so it can linger for 15s
-                if ((status == "ARCHIVED" || pubsubType == "POLL_ARCHIVE") && Poll != null && string.Equals(Poll.PollId, pollId, StringComparison.Ordinal))
+                // Twitch sends POLL_ARCHIVE (status: "ARCHIVED") 30-60s after POLL_COMPLETE.
+                // If the poll is still in its 15s linger window, ensure it is marked COMPLETED; if it already expired (Poll == null),
+                // NEVER fall through and resurrect the archived poll.
+                if (status == "ARCHIVED" || pubsubType == "POLL_ARCHIVE")
                 {
-                    Poll.Status = "COMPLETED";
-                    Poll.CompletedOffsetSeconds ??= ev.content_offset_seconds;
+                    if (!string.IsNullOrEmpty(pollId))
+                    {
+                        _pollCompletedAtById.TryAdd(pollId, ev.content_offset_seconds);
+                    }
+
+                    if (Poll != null && (string.IsNullOrEmpty(pollId) || string.Equals(Poll.PollId, pollId, StringComparison.Ordinal)))
+                    {
+                        Poll.Status = "COMPLETED";
+                        Poll.CompletedOffsetSeconds ??= ev.content_offset_seconds;
+                    }
                     return;
+                }
+
+                bool isEndedStatus = status != "ACTIVE"
+                    || pubsubType is "POLL_COMPLETE" or "POLL_TERMINATE";
+
+                // Ignore carried-over polls at the start of a sliced VOD if they are already completed/terminated
+                if (ev.carried_over && isEndedStatus)
+                {
+                    if (!string.IsNullOrEmpty(pollId))
+                    {
+                        _pollCompletedAtById.TryAdd(pollId, -STICKY_RESOLVED_LINGER_SECONDS);
+                    }
+                    return;
+                }
+
+                // If this poll already completed earlier (either via POLL_COMPLETE or auto-expiry), never resurrect it after its 15s linger window
+                double? priorCompletedAt = null;
+                if (!string.IsNullOrEmpty(pollId) && _pollCompletedAtById.TryGetValue(pollId, out double recordedCompAt))
+                {
+                    if (ev.content_offset_seconds - recordedCompAt >= STICKY_RESOLVED_LINGER_SECONDS)
+                    {
+                        return;
+                    }
+                    priorCompletedAt = recordedCompAt;
                 }
 
                 string title = GetJsonString(d, "title") ?? "Poll";
@@ -235,12 +301,16 @@ namespace TwitchDownloaderCore
 
                 bool isSamePoll = Poll != null && string.Equals(Poll.PollId, pollId, StringComparison.Ordinal);
                 double startedOffset = isSamePoll ? Poll.StartedOffsetSeconds : ev.content_offset_seconds;
-                double? completedOffset = isSamePoll ? Poll.CompletedOffsetSeconds : null;
+                double? completedOffset = priorCompletedAt ?? (isSamePoll ? Poll.CompletedOffsetSeconds : null);
 
-                if ((status is "COMPLETED" or "TERMINATED" || pubsubType == "POLL_COMPLETE") && completedOffset is null)
+                if (isEndedStatus || completedOffset is not null)
                 {
                     status = "COMPLETED";
-                    completedOffset = ev.content_offset_seconds;
+                    completedOffset ??= ev.content_offset_seconds;
+                    if (!string.IsNullOrEmpty(pollId))
+                    {
+                        _pollCompletedAtById.TryAdd(pollId, completedOffset.Value);
+                    }
                 }
 
                 Poll = new ActivePollState
@@ -261,7 +331,7 @@ namespace TwitchDownloaderCore
             {
                 var d = ev.data;
                 string action = (GetJsonString(d, "action") ?? "pin-message").ToLowerInvariant();
-                if (action == "unpin-message")
+                if (action is "unpin-message" or "unpin_message")
                 {
                     PinnedChat = null;
                     return;
@@ -269,18 +339,72 @@ namespace TwitchDownloaderCore
 
                 string pinId = GetJsonString(d, "pin_id") ?? "";
                 string type = GetJsonString(d, "type") ?? "MOD_PIN";
-                string msgText = (GetJsonString(d, "message_text") ?? "").Trim();
-                string senderName = GetJsonString(d, "sender_display_name") ?? "Chatter";
-                string senderColor = GetJsonString(d, "sender_color") ?? "#9146FF";
-                string pinnedBy = GetJsonString(d, "pinned_by_display_name") ?? "";
+                string rawMsgText = GetJsonString(d, "message_text");
+                if (string.IsNullOrWhiteSpace(rawMsgText)
+                    && d.TryGetProperty("message", out var msgObj)
+                    && msgObj.ValueKind == JsonValueKind.Object)
+                {
+                    rawMsgText = GetJsonString(msgObj, "text");
+                }
+                string msgText = (rawMsgText ?? "").Trim();
+
+                string rawSenderName = GetJsonString(d, "sender_display_name");
+                string rawSenderColor = GetJsonString(d, "sender_color");
+                if (string.IsNullOrWhiteSpace(rawSenderName)
+                    && d.TryGetProperty("message", out var msgObjForSender)
+                    && msgObjForSender.ValueKind == JsonValueKind.Object
+                    && msgObjForSender.TryGetProperty("sender", out var senderObj)
+                    && senderObj.ValueKind == JsonValueKind.Object)
+                {
+                    rawSenderName = GetJsonString(senderObj, "display_name");
+                    if (string.IsNullOrWhiteSpace(rawSenderColor))
+                    {
+                        rawSenderColor = GetJsonString(senderObj, "chat_color");
+                    }
+                }
+
                 long startsAt = GetJsonLong(d, "starts_at", 0);
                 long endsAt = GetJsonLong(d, "ends_at", 0);
 
-                double? expiresOffset = null;
-                if (endsAt > startsAt && startsAt > 0)
+                // Twitch PubSub "update-message" events are delta updates that omit message_text and sender_display_name.
+                // Never overwrite an active pin with blank "Chatter:" fields or clear its expiration timer on a delta update.
+                if (action is "update-message" or "update_pinned_message" or "update_message")
                 {
-                    expiresOffset = ev.content_offset_seconds + (endsAt - startsAt);
+                    if (PinnedChat != null && (string.IsNullOrEmpty(pinId) || string.Equals(PinnedChat.PinId, pinId, StringComparison.Ordinal)))
+                    {
+                        if (!string.IsNullOrWhiteSpace(msgText))
+                        {
+                            PinnedChat.MessageText = msgText;
+                        }
+                        if (!string.IsNullOrWhiteSpace(rawSenderName))
+                        {
+                            PinnedChat.SenderDisplayName = rawSenderName;
+                            if (!string.IsNullOrWhiteSpace(rawSenderColor))
+                            {
+                                PinnedChat.SenderColor = rawSenderColor;
+                            }
+                        }
+                        if (endsAt > startsAt && startsAt > 0)
+                        {
+                            PinnedChat.ExpiresOffsetSeconds = ev.content_offset_seconds + (endsAt - startsAt);
+                        }
+                    }
+                    return;
                 }
+
+                // Ignore malformed or empty pin events that have no message text to display
+                if (string.IsNullOrWhiteSpace(msgText))
+                {
+                    return;
+                }
+
+                string senderName = !string.IsNullOrWhiteSpace(rawSenderName) ? rawSenderName : "Chatter";
+                string senderColor = !string.IsNullOrWhiteSpace(rawSenderColor) ? rawSenderColor : "#9146FF";
+                string pinnedBy = GetJsonString(d, "pinned_by_display_name") ?? "";
+
+                double expiresOffset = endsAt > startsAt && startsAt > 0
+                    ? ev.content_offset_seconds + (endsAt - startsAt)
+                    : ev.content_offset_seconds + 1200.0;
 
                 PinnedChat = new ActivePinnedChatState
                 {
@@ -299,10 +423,38 @@ namespace TwitchDownloaderCore
             {
                 var d = ev.data;
                 string pubsubType = (GetJsonString(d, "pubsub_type") ?? "").ToLowerInvariant();
-                int level = Math.Max(1, GetJsonInt(d, "level", HypeTrain?.Level ?? 1));
-                int goal = Math.Max(1, GetJsonInt(d, "goal", HypeTrain?.Goal ?? 1000));
-                int total = GetJsonInt(d, "total", HypeTrain?.Total ?? 0);
-                int progress = GetJsonInt(d, "progress", HypeTrain?.Progress ?? 0);
+
+                // "hype-train-approaching" is a pre-train alert (goal: 3, progress: 0) before a train actually starts.
+                // Ignore it so an unstarted train does not sit on screen for 3 minutes at 0%.
+                if (pubsubType == "hype-train-approaching")
+                {
+                    return;
+                }
+
+                // "hype-train-conductor-update" only updates the conductor user and carries goal: 0, progress: 0 in PubSub JSON.
+                if (pubsubType == "hype-train-conductor-update" && HypeTrain is null)
+                {
+                    return;
+                }
+
+                int rawLevel = GetJsonInt(d, "level", HypeTrain?.Level ?? 1);
+                int rawGoal = GetJsonInt(d, "goal", HypeTrain?.Goal ?? 1000);
+                int rawTotal = GetJsonInt(d, "total", HypeTrain?.Total ?? 0);
+                int rawProgress = GetJsonInt(d, "progress", HypeTrain?.Progress ?? 0);
+
+                bool isDeltaOrEndWithoutProgress = (pubsubType is "hype-train-conductor-update" or "hype-train-end" || rawGoal <= 0)
+                    && HypeTrain != null;
+
+                int level = Math.Max(1, rawLevel > 0 ? rawLevel : (HypeTrain?.Level ?? 1));
+                int goal = isDeltaOrEndWithoutProgress && rawGoal <= 0
+                    ? HypeTrain.Goal
+                    : Math.Max(1, rawGoal);
+                int total = isDeltaOrEndWithoutProgress && rawTotal <= 0
+                    ? HypeTrain.Total
+                    : rawTotal;
+                int progress = isDeltaOrEndWithoutProgress && rawProgress <= 0
+                    ? HypeTrain.Progress
+                    : rawProgress;
 
                 bool isEnded = pubsubType == "hype-train-end";
                 double startedOffset = HypeTrain is { IsEnded: false } ? HypeTrain.StartedOffsetSeconds : ev.content_offset_seconds;
@@ -356,11 +508,30 @@ namespace TwitchDownloaderCore
                     {
                         if (currentTimeSeconds - compAt >= STICKY_RESOLVED_LINGER_SECONDS)
                         {
+                            if (!string.IsNullOrEmpty(Poll.PollId))
+                            {
+                                _pollCompletedAtById.TryAdd(Poll.PollId, compAt);
+                            }
                             Poll = null;
                         }
                     }
-                    else if (Poll.Status == "ACTIVE" && currentTimeSeconds - Poll.StartedOffsetSeconds > Poll.DurationSeconds + STICKY_RESOLVED_LINGER_SECONDS)
+                    else if (Poll.Status != "ACTIVE")
                     {
+                        if (currentTimeSeconds - Poll.LastUpdatedOffsetSeconds >= STICKY_RESOLVED_LINGER_SECONDS)
+                        {
+                            if (!string.IsNullOrEmpty(Poll.PollId))
+                            {
+                                _pollCompletedAtById.TryAdd(Poll.PollId, Poll.LastUpdatedOffsetSeconds);
+                            }
+                            Poll = null;
+                        }
+                    }
+                    else if (currentTimeSeconds - Poll.StartedOffsetSeconds > Poll.DurationSeconds + STICKY_RESOLVED_LINGER_SECONDS)
+                    {
+                        if (!string.IsNullOrEmpty(Poll.PollId))
+                        {
+                            _pollCompletedAtById.TryAdd(Poll.PollId, Poll.StartedOffsetSeconds + Poll.DurationSeconds);
+                        }
                         Poll = null;
                     }
                 }
@@ -439,6 +610,8 @@ namespace TwitchDownloaderCore
                     hc.Add(3);
                     hc.Add(PinnedChat.PinId);
                     hc.Add(PinnedChat.MessageText);
+                    hc.Add(PinnedChat.SenderDisplayName);
+                    hc.Add(PinnedChat.SenderColor);
                 }
 
                 if (HypeTrain != null)
@@ -703,7 +876,7 @@ namespace TwitchDownloaderCore
                             {
                                 string notice = action == "ban" || durationSec is null or <= 0
                                     ? $"{targetLogin} was permanently banned."
-                                    : $"{targetLogin} was timed out for {durationSec.Value}s.";
+                                    : $"{targetLogin} was timed out for {FormatTimeoutDuration(durationSec.Value)}.";
                                 syntheticComments.Add(CreateSyntheticNoticeComment(ev.content_offset_seconds, notice, compact: true));
                             }
                         }
@@ -875,7 +1048,7 @@ namespace TwitchDownloaderCore
                         string bgColorHex = GetJsonString(d, "reward_background_color");
                         string userInput = GetJsonString(d, "user_input");
 
-                        uint accentColor = TryParseColorUint(bgColorHex, 0xFF9146FF);
+                        uint accentColor = ResolveChannelPointAccentColor(bgColorHex, 0xFF9146FF);
                         string costPart = rewardCost > 0 ? $" ({rewardCost:N0})" : "";
                         string body = string.IsNullOrWhiteSpace(userInput)
                             ? $"{userDisplay} redeemed {rewardTitle}{costPart}"
@@ -1005,10 +1178,17 @@ namespace TwitchDownloaderCore
                         {
                             string action = (GetJsonString(d, "action") ?? "pin-message").ToLowerInvariant();
                             string pinId = GetJsonString(d, "pin_id") ?? "";
-                            if (action == "pin-message" && seenPins.Add(pinId))
+                            string msg = (GetJsonString(d, "message_text") ?? "").Trim();
+                            if (string.IsNullOrEmpty(msg)
+                                && d.TryGetProperty("message", out var msgObj)
+                                && msgObj.ValueKind == JsonValueKind.Object)
+                            {
+                                msg = (GetJsonString(msgObj, "text") ?? "").Trim();
+                            }
+
+                            if (action == "pin-message" && !string.IsNullOrEmpty(msg) && seenPins.Add(pinId))
                             {
                                 string sender = GetJsonString(d, "sender_display_name") ?? "Chatter";
-                                string msg = (GetJsonString(d, "message_text") ?? "").Trim();
                                 string pinnedBy = GetJsonString(d, "pinned_by_display_name");
                                 string prefix = !string.IsNullOrEmpty(pinnedBy) ? $"Pinned by {pinnedBy} — " : "Pinned message — ";
                                 syntheticComments.Add(CreateSyntheticNoticeComment(ev.content_offset_seconds, $"{prefix}{sender}: {msg}", compact: false, accentColor: 0xFF9146FF));
@@ -1071,13 +1251,74 @@ namespace TwitchDownloaderCore
             if (syntheticComments.Count > 0)
             {
                 chatRoot.comments.AddRange(syntheticComments);
-                // Stable chronological sort by content_offset_seconds
-                var sorted = chatRoot.comments.OrderBy(static c => c.content_offset_seconds).ToList();
-                chatRoot.comments.Clear();
-                chatRoot.comments.AddRange(sorted);
             }
 
+            EnsureCommentsSortedChronologically(chatRoot.comments);
+
             _stickyBroadcastEvents = stickyEvents;
+        }
+
+        private static void EnsureCommentsSortedChronologically(List<Comment> comments)
+        {
+            if (comments is null || comments.Count <= 1)
+            {
+                return;
+            }
+
+            bool needsSort = false;
+            double prev = comments[0].content_offset_seconds;
+            for (int i = 1; i < comments.Count; i++)
+            {
+                double cur = comments[i].content_offset_seconds;
+                if (cur < prev)
+                {
+                    needsSort = true;
+                    break;
+                }
+                prev = cur;
+            }
+
+            if (needsSort)
+            {
+                var sorted = comments.OrderBy(static c => c.content_offset_seconds).ToList();
+                comments.Clear();
+                comments.AddRange(sorted);
+            }
+        }
+
+        private static string FormatTimeoutDuration(int seconds)
+        {
+            if (seconds <= 0) return "0s";
+            if (seconds < 60) return $"{seconds}s";
+            if (seconds < 3600)
+            {
+                int mins = seconds / 60;
+                int remSec = seconds % 60;
+                return remSec == 0 ? $"{mins}m" : $"{mins}m {remSec}s";
+            }
+            if (seconds < 86400)
+            {
+                int hours = seconds / 3600;
+                int remMins = (seconds % 3600) / 60;
+                return remMins == 0 ? $"{hours}h" : $"{hours}h {remMins}m";
+            }
+
+            int days = seconds / 86400;
+            int remHours = (seconds % 86400) / 3600;
+            return remHours == 0 ? $"{days}d" : $"{days}d {remHours}h";
+        }
+
+        private static uint ResolveChannelPointAccentColor(string hex, uint fallback)
+        {
+            if (!string.IsNullOrWhiteSpace(hex) && SKColor.TryParse(hex, out var parsed))
+            {
+                // Avoid pure black or near-black custom reward colors (#000000) which are invisible on dark chat backgrounds
+                if (parsed.RelativeLuminance() >= 0.04)
+                {
+                    return (uint)parsed;
+                }
+            }
+            return fallback;
         }
 
         private static Comment CreateSyntheticNoticeComment(double offsetSeconds, string bodyText, bool compact, uint? accentColor = null)
@@ -1881,13 +2122,16 @@ namespace TwitchDownloaderCore
 
             if (font.ContainsGlyphs(text))
             {
-                if (renderOptions.Outline && ctx?.OutlinePaint != null)
+                if (canvas != null)
                 {
-                    using var outlinePath = font.GetTextPath(text, x, y);
-                    canvas.DrawPath(outlinePath, ctx.OutlinePaint);
-                }
+                    if (renderOptions.Outline && ctx?.OutlinePaint != null)
+                    {
+                        using var outlinePath = font.GetTextPath(text, x, y);
+                        canvas.DrawPath(outlinePath, ctx.OutlinePaint);
+                    }
 
-                canvas.DrawText(text, x, y, font);
+                    canvas.DrawText(text, x, y, font);
+                }
                 return x + font.MeasureText(text);
             }
 
@@ -1910,9 +2154,12 @@ namespace TwitchDownloaderCore
                         if (written > 0 && TryGetEmojiImage(emojiKeyStack[..written], out var emojiImg) && emojiImg != null)
                         {
                             float targetSize = Math.Max(10f, font.TextSize * 1.05f);
-                            float topY = y - targetSize * 0.82f;
-                            var destRect = new SKRect(curX, topY, curX + targetSize, topY + targetSize);
-                            canvas.DrawImage(emojiImg, destRect);
+                            if (canvas != null)
+                            {
+                                float topY = y - targetSize * 0.82f;
+                                var destRect = new SKRect(curX, topY, curX + targetSize, topY + targetSize);
+                                canvas.DrawImage(emojiImg, destRect);
+                            }
                             curX += targetSize + Math.Max(1f, font.TextSize * 0.08f);
                             i += elemLen;
                             continue;
@@ -1940,13 +2187,16 @@ namespace TwitchDownloaderCore
                 using (clonedFallback)
                 {
                     string runStr = elem.ToString();
-                    if (renderOptions.Outline && ctx?.OutlinePaint != null)
+                    if (canvas != null)
                     {
-                        using var outlinePath = activeFont.GetTextPath(runStr, curX, y);
-                        canvas.DrawPath(outlinePath, ctx.OutlinePaint);
-                    }
+                        if (renderOptions.Outline && ctx?.OutlinePaint != null)
+                        {
+                            using var outlinePath = activeFont.GetTextPath(runStr, curX, y);
+                            canvas.DrawPath(outlinePath, ctx.OutlinePaint);
+                        }
 
-                    canvas.DrawText(runStr, curX, y, activeFont);
+                        canvas.DrawText(runStr, curX, y, activeFont);
+                    }
                     curX += activeFont.MeasureText(runStr);
                 }
 
@@ -2080,6 +2330,67 @@ namespace TwitchDownloaderCore
             return Math.Max(12, (int)Math.Round(renderOptions.SectionHeight * 0.66));
         }
 
+        private static Comment StripRedundantReplyLeadingMention(Comment comment)
+        {
+            var reply = comment.event_data?.reply;
+            if (reply is null || comment.message?.fragments is not { Count: > 0 })
+            {
+                return comment;
+            }
+
+            string firstText = comment.message.fragments[0]?.text;
+            if (string.IsNullOrEmpty(firstText) || firstText[0] != '@')
+            {
+                return comment;
+            }
+
+            ReadOnlySpan<char> span = firstText.AsSpan();
+            int matchLen = 0;
+
+            if (!string.IsNullOrEmpty(reply.parent_display_name)
+                && span.Length > reply.parent_display_name.Length + 1
+                && span[1..].StartsWith(reply.parent_display_name, StringComparison.OrdinalIgnoreCase)
+                && char.IsWhiteSpace(span[1 + reply.parent_display_name.Length]))
+            {
+                matchLen = 1 + reply.parent_display_name.Length + 1;
+            }
+            else if (!string.IsNullOrEmpty(reply.parent_user_login)
+                && span.Length > reply.parent_user_login.Length + 1
+                && span[1..].StartsWith(reply.parent_user_login, StringComparison.OrdinalIgnoreCase)
+                && char.IsWhiteSpace(span[1 + reply.parent_user_login.Length]))
+            {
+                matchLen = 1 + reply.parent_user_login.Length + 1;
+            }
+
+            if (matchLen <= 0)
+            {
+                return comment;
+            }
+
+            string remainingFirst = firstText[matchLen..].TrimStart();
+            if (string.IsNullOrEmpty(remainingFirst) && comment.message.fragments.Count == 1)
+            {
+                return comment;
+            }
+
+            var cloned = comment.Clone();
+            if (!string.IsNullOrEmpty(cloned.message.body) && cloned.message.body.Length >= matchLen)
+            {
+                cloned.message.body = cloned.message.body[matchLen..].TrimStart();
+            }
+
+            if (string.IsNullOrEmpty(remainingFirst))
+            {
+                cloned.message.fragments.RemoveAt(0);
+            }
+            else
+            {
+                cloned.message.fragments[0].text = remainingFirst;
+            }
+
+            return cloned;
+        }
+
         private void DrawReplyHeaderOnCombinedCanvas(SKCanvas canvas, Comment comment, int replyHeaderHeight, bool hasLeftAccentBar, SectionRenderContext ctx)
         {
             var reply = comment.event_data?.reply;
@@ -2091,7 +2402,11 @@ namespace TwitchDownloaderCore
             string parentName = !string.IsNullOrEmpty(reply.parent_display_name)
                 ? reply.parent_display_name
                 : (reply.parent_user_login ?? "User");
-            string parentBody = (reply.parent_msg_body ?? "").Replace('\n', ' ').Replace('\r', ' ').Trim();
+            string parentBody = (reply.parent_msg_body ?? "")
+                .Replace(@"\s", " ")
+                .Replace('\n', ' ')
+                .Replace('\r', ' ')
+                .Trim();
             string fullReplyLine = string.IsNullOrEmpty(parentBody)
                 ? $"Replying to @{parentName}"
                 : $"@{parentName}: {parentBody}";
@@ -2233,8 +2548,16 @@ namespace TwitchDownloaderCore
             if (tracker.Prediction != null)
             {
                 bool isLocked = tracker.Prediction.Status == "LOCKED";
-                int h = (int)Math.Round(baseRowH * 1.45);
+                bool isOpen = tracker.Prediction.Status == "ACTIVE";
+                int outcomeCount = Math.Clamp(tracker.Prediction.Outcomes.Count, 2, 10);
+                int h = isOpen
+                    ? (int)Math.Round(baseRowH * (0.82 + outcomeCount * 0.56))
+                    : (int)Math.Round(baseRowH * 1.45);
                 candidates.Add((isLocked ? StickyWidgetKind.PredictionLocked : StickyWidgetKind.PredictionOpenOrResolved, h));
+                if (isOpen)
+                {
+                    maxAllowedHeight = Math.Max(maxAllowedHeight, h);
+                }
             }
 
             if (tracker.Poll != null)
@@ -2244,10 +2567,12 @@ namespace TwitchDownloaderCore
                 candidates.Add((StickyWidgetKind.Poll, h));
             }
 
+            List<string> pinnedChatWrappedLines = null;
             if (tracker.PinnedChat != null)
             {
-                int h = (int)Math.Round(baseRowH * 1.20);
-                candidates.Add((StickyWidgetKind.PinnedChat, h));
+                pinnedChatWrappedLines = LayoutStickyPinnedChat(tracker.PinnedChat, ctx, out int pinHeight);
+                candidates.Add((StickyWidgetKind.PinnedChat, pinHeight));
+                maxAllowedHeight = Math.Max(maxAllowedHeight, pinHeight);
             }
 
             if (tracker.HypeTrain != null)
@@ -2269,9 +2594,12 @@ namespace TwitchDownloaderCore
             for (int i = 0; i < candidates.Count; i++)
             {
                 var c = candidates[i];
-                if (i == 0 || totalHeight + c.Height <= maxAllowedHeight)
+                if (i == 0 || c.Kind == StickyWidgetKind.PinnedChat || totalHeight + c.Height <= maxAllowedHeight)
                 {
-                    int clampedH = i == 0 ? Math.Min(c.Height, Math.Max(baseRowH, (int)(renderOptions.ChatHeight * 0.42))) : c.Height;
+                    int maxSingleCap = c.Kind == StickyWidgetKind.PinnedChat
+                        ? Math.Max(baseRowH, (int)(renderOptions.ChatHeight * 0.65))
+                        : Math.Max(baseRowH, (int)(renderOptions.ChatHeight * 0.42));
+                    int clampedH = i == 0 || c.Kind == StickyWidgetKind.PinnedChat ? Math.Min(c.Height, maxSingleCap) : c.Height;
                     selected.Add((c.Kind, clampedH));
                     totalHeight += clampedH;
                 }
@@ -2299,7 +2627,7 @@ namespace TwitchDownloaderCore
                         DrawStickyPollWidget(frameCanvas, tracker.Poll, currentY, widgetHeight, currentTimeSeconds, ctx);
                         break;
                     case StickyWidgetKind.PinnedChat:
-                        DrawStickyPinnedChatWidget(frameCanvas, tracker.PinnedChat, currentY, widgetHeight, ctx);
+                        DrawStickyPinnedChatWidget(frameCanvas, tracker.PinnedChat, pinnedChatWrappedLines, currentY, widgetHeight, ctx);
                         break;
                     case StickyWidgetKind.HypeTrain:
                         DrawStickyHypeTrainWidget(frameCanvas, tracker.HypeTrain, currentY, widgetHeight, ctx);
@@ -2327,6 +2655,7 @@ namespace TwitchDownloaderCore
             subFont.TextSize = (float)Math.Max(8, renderOptions.FontSize * 0.74);
             subFont.Color = new SKColor(0xFFADADB8);
 
+            bool isOpen = pred.Status == "ACTIVE";
             string statusTag = pred.Status switch
             {
                 "LOCKED" => "LOCKED",
@@ -2335,6 +2664,73 @@ namespace TwitchDownloaderCore
                 _ => FormatCountdownSeconds(Math.Max(0, (int)Math.Ceiling(pred.WindowSeconds - (currentTimeSeconds - pred.StartedOffsetSeconds))))
             };
 
+            long totalPoints = 0;
+            foreach (var o in pred.Outcomes) totalPoints += o.TotalPoints;
+
+            // While ACTIVE (open), render each prediction outcome on its own full-width bar row (like Polls).
+            if (isOpen)
+            {
+                int outcomeCount = Math.Clamp(pred.Outcomes.Count, 2, 10);
+                float headerRegionH = Math.Max(14f, height * (0.76f / (0.76f + outcomeCount * 0.56f)));
+                float openRow1Baseline = topY + headerRegionH * 0.74f;
+
+                DrawSingleLineTextDirect(canvas, statusTag, width - padX - subFont.MeasureText(statusTag), openRow1Baseline, subFont, ctx);
+
+                string openHeaderText = $"🔮 {pred.Title}";
+                string openClippedHeader = TruncateSingleLine(openHeaderText, titleFont, Math.Max(30, width - padX * 2 - (int)subFont.MeasureText(statusTag) - padX));
+                DrawSingleLineTextDirect(canvas, openClippedHeader, padX + 4, openRow1Baseline, titleFont, ctx);
+
+                float outcomesAreaTop = topY + headerRegionH;
+                float outcomesAreaHeight = Math.Max(12f, height - headerRegionH - 3f);
+                float slotHeight = outcomesAreaHeight / outcomeCount;
+                float openBarHeight = Math.Max(8f, slotHeight * 0.82f);
+                float openBarLeft = padX + 4;
+                float openBarTotalWidth = Math.Max(20f, width - openBarLeft - padX);
+
+                using var trackPaint = new SKPaint { Color = new SKColor(0xFF2D2D35), IsAntialias = true };
+                using var blueFillPaint = new SKPaint { Color = new SKColor(0xFF387AFF), IsAntialias = true };
+                using var pinkFillPaint = new SKPaint { Color = new SKColor(0xFFF5009B), IsAntialias = true };
+
+                SKRect textBounds = new();
+                subFont.MeasureText("Ag", ref textBounds);
+                subFont.Color = SKColors.White;
+
+                for (int i = 0; i < outcomeCount; i++)
+                {
+                    var outcome = i < pred.Outcomes.Count
+                        ? pred.Outcomes[i]
+                        : new ActivePredictionOutcome { Id = (i + 1).ToString(), Title = i == 0 ? "Yes" : "No", Color = i == 0 ? "BLUE" : "PINK", TotalPoints = 0 };
+
+                    int pct = totalPoints > 0 ? (int)Math.Round(outcome.TotalPoints * 100.0 / totalPoints) : 0;
+                    bool isPink = string.Equals(outcome.Color, "PINK", StringComparison.OrdinalIgnoreCase)
+                        || (i % 2 == 1 && !string.Equals(outcome.Color, "BLUE", StringComparison.OrdinalIgnoreCase));
+
+                    float slotTop = outcomesAreaTop + i * slotHeight;
+                    float curBarTop = slotTop + (slotHeight - openBarHeight) * 0.5f;
+
+                    canvas.DrawRoundRect(openBarLeft, curBarTop, openBarTotalWidth, openBarHeight, 3f, 3f, trackPaint);
+
+                    if (pct > 0)
+                    {
+                        float fillW = openBarTotalWidth * Math.Clamp(pct / 100f, 0.02f, 1.0f);
+                        canvas.DrawRoundRect(openBarLeft, curBarTop, fillW, openBarHeight, 3f, 3f, isPink ? pinkFillPaint : blueFillPaint);
+                    }
+
+                    string rightPctText = $"{pct}%";
+                    float rightPctWidth = subFont.MeasureText(rightPctText);
+                    float textBaseline = curBarTop + (openBarHeight + textBounds.Height) * 0.5f - 1f;
+
+                    int maxTitleWidth = Math.Max(20, (int)(openBarTotalWidth - rightPctWidth - 16));
+                    string clippedTitle = TruncateSingleLine(outcome.Title, subFont, maxTitleWidth);
+
+                    DrawSingleLineTextDirect(canvas, clippedTitle, openBarLeft + 6, textBaseline, subFont, ctx);
+                    DrawSingleLineTextDirect(canvas, rightPctText, openBarLeft + openBarTotalWidth - rightPctWidth - 6, textBaseline, subFont, ctx);
+                }
+
+                return;
+            }
+
+            // Once LOCKED, RESOLVED, or CANCELED, compact back to a 1-bar summary row.
             float statusWidth = subFont.MeasureText(statusTag) + padX;
             float row1Baseline = topY + height * 0.40f;
             DrawSingleLineTextDirect(canvas, statusTag, width - padX - subFont.MeasureText(statusTag), row1Baseline, subFont, ctx);
@@ -2343,15 +2739,23 @@ namespace TwitchDownloaderCore
             string clippedHeader = TruncateSingleLine(headerText, titleFont, Math.Max(30, width - padX * 2 - (int)statusWidth));
             DrawSingleLineTextDirect(canvas, clippedHeader, padX + 4, row1Baseline, titleFont, ctx);
 
-            // Outcome bar & percentages on Row 2
-            long totalPoints = 0;
-            foreach (var o in pred.Outcomes) totalPoints += o.TotalPoints;
-
             var o1 = pred.Outcomes.Count > 0 ? pred.Outcomes[0] : new ActivePredictionOutcome { Id = "1", Title = "Yes", TotalPoints = 0 };
             var o2 = pred.Outcomes.Count > 1 ? pred.Outcomes[1] : new ActivePredictionOutcome { Id = "2", Title = "No", TotalPoints = 0 };
 
+            // If a multi-outcome (>2) prediction resolved to an outcome beyond index 1, ensure the winning outcome is visible in the compact bar
+            if (pred.Status == "RESOLVED" && !string.IsNullOrEmpty(pred.WinningOutcomeId)
+                && !string.Equals(o1.Id, pred.WinningOutcomeId, StringComparison.Ordinal)
+                && !string.Equals(o2.Id, pred.WinningOutcomeId, StringComparison.Ordinal))
+            {
+                var winningOutcome = pred.Outcomes.FirstOrDefault(o => string.Equals(o.Id, pred.WinningOutcomeId, StringComparison.Ordinal));
+                if (winningOutcome != null)
+                {
+                    o1 = winningOutcome;
+                }
+            }
+
             int pct1 = totalPoints > 0 ? (int)Math.Round(o1.TotalPoints * 100.0 / totalPoints) : 50;
-            int pct2 = totalPoints > 0 ? 100 - pct1 : 50;
+            int pct2 = totalPoints > 0 ? (pred.Outcomes.Count <= 2 ? 100 - pct1 : (int)Math.Round(o2.TotalPoints * 100.0 / totalPoints)) : 50;
 
             float barTop = topY + height * 0.54f;
             float barHeight = Math.Max(8f, height * 0.34f);
@@ -2401,7 +2805,7 @@ namespace TwitchDownloaderCore
             subFont.TextSize = (float)Math.Max(8, renderOptions.FontSize * 0.72);
             subFont.Color = new SKColor(0xFFADADB8);
 
-            bool isEnded = poll.Status is "COMPLETED" or "TERMINATED";
+            bool isEnded = poll.Status != "ACTIVE";
             string statusTag = isEnded
                 ? "POLL ENDED"
                 : FormatCountdownSeconds(Math.Max(0, (int)Math.Ceiling(poll.DurationSeconds - (currentTimeSeconds - poll.StartedOffsetSeconds))));
@@ -2478,30 +2882,184 @@ namespace TwitchDownloaderCore
             }
         }
 
-        private void DrawStickyPinnedChatWidget(SKCanvas canvas, ActivePinnedChatState pin, int topY, int height, SectionRenderContext ctx)
+        private List<string> LayoutStickyPinnedChat(ActivePinnedChatState pin, SectionRenderContext ctx, out int totalHeight)
         {
             int width = renderOptions.ChatWidth;
             int padX = Math.Max(6, renderOptions.SidePadding);
+            int baseRowH = Math.Max(18, renderOptions.SectionHeight);
+
+            using var nameFontLocal = ctx.NameFont.Clone();
+            nameFontLocal.TextSize = (float)Math.Max(9, renderOptions.FontSize * 0.82);
+
+            using var msgFontLocal = ctx.MessageFont.Clone();
+            msgFontLocal.TextSize = (float)Math.Max(9, renderOptions.FontSize * 0.82);
+
+            float leftX = padX + 4;
+            string prefix = $"📌 {pin.SenderDisplayName}: ";
+            float afterPrefixX = DrawSingleLineTextDirect(null, prefix, leftX, 0f, nameFontLocal, ctx);
+
+            float firstLineMaxW = Math.Max(20f, width - afterPrefixX - padX);
+            float fullLineMaxW = Math.Max(20f, width - leftX - padX);
+
+            var lines = WrapPinnedChatMessageLines(pin.MessageText, msgFontLocal, firstLineMaxW, fullLineMaxW, ctx);
+            int lineCount = Math.Max(1, lines.Count);
+            float lineStep = Math.Max(12f, Math.Max(msgFontLocal.TextSize * 1.28f, baseRowH * 0.72f));
+
+            totalHeight = (int)Math.Round(baseRowH * 1.20 + (lineCount - 1) * lineStep);
+            return lines;
+        }
+
+        private List<string> WrapPinnedChatMessageLines(string rawText, SKPaint msgFont, float firstLineMaxW, float fullLineMaxW, SectionRenderContext ctx)
+        {
+            string normalized = (rawText ?? "").Replace('\r', ' ').Replace('\n', ' ').Trim();
+            if (string.IsNullOrEmpty(normalized))
+            {
+                return [""];
+            }
+
+            var lines = new List<string>(2);
+            ReadOnlySpan<char> rem = normalized.AsSpan();
+
+            while (!rem.IsEmpty)
+            {
+                float maxW = lines.Count == 0 ? firstLineMaxW : fullLineMaxW;
+                string remStr = rem.ToString();
+                if (DrawSingleLineTextDirect(null, remStr, 0f, 0f, msgFont, ctx) <= maxW)
+                {
+                    lines.Add(remStr);
+                    break;
+                }
+
+                int breakCount = MeasureFittingCharCount(rem, maxW, msgFont, ctx);
+                int lastSpace = rem[..breakCount].LastIndexOf(' ');
+                if (lastSpace > 0)
+                {
+                    lines.Add(rem[..lastSpace].TrimEnd().ToString());
+                    rem = rem[(lastSpace + 1)..].TrimStart();
+                    continue;
+                }
+
+                // Single word/token is wider than maxW.
+                // If we are on Line 0 (after the username prefix) and this word would fit unbroken on Line 1,
+                // leave Line 0's message slot empty and wrap the word intact onto Line 1.
+                if (lines.Count == 0 && firstLineMaxW < fullLineMaxW)
+                {
+                    int nextSpace = rem.IndexOf(' ');
+                    ReadOnlySpan<char> firstWord = nextSpace >= 0 ? rem[..nextSpace] : rem;
+                    if (DrawSingleLineTextDirect(null, firstWord.ToString(), 0f, 0f, msgFont, ctx) <= fullLineMaxW)
+                    {
+                        lines.Add("");
+                        continue;
+                    }
+                }
+
+                // Token is wider than even a full line (e.g. a long URL). Prefer splitting after URL/path punctuation.
+                int splitAt = breakCount;
+                int minPunctIdx = Math.Max(1, breakCount / 2);
+                for (int k = breakCount - 1; k >= minPunctIdx; k--)
+                {
+                    char ch = rem[k];
+                    if (ch is '/' or '-' or '_' or '?' or '&' or '=' or '.')
+                    {
+                        splitAt = k + 1;
+                        break;
+                    }
+                }
+
+                lines.Add(rem[..splitAt].ToString());
+                rem = rem[splitAt..].TrimStart();
+            }
+
+            if (lines.Count == 0)
+            {
+                lines.Add("");
+            }
+
+            return lines;
+        }
+
+        private int MeasureFittingCharCount(ReadOnlySpan<char> span, float maxW, SKPaint font, SectionRenderContext ctx)
+        {
+            if (span.IsEmpty)
+            {
+                return 0;
+            }
+
+            if (font.ContainsGlyphs(span))
+            {
+                int count = (int)font.BreakText(span, maxW);
+                count = Math.Clamp(count, 1, span.Length);
+                if (count > 1 && count < span.Length && char.IsHighSurrogate(span[count - 1]))
+                {
+                    count--;
+                }
+                return count;
+            }
+
+            string full = span.ToString();
+            float accumW = 0f;
+            int idx = 0;
+            while (idx < full.Length)
+            {
+                int elemLen = StringInfo.GetNextTextElementLength(full.AsSpan(idx));
+                if (elemLen <= 0) elemLen = 1;
+                string elemStr = full.Substring(idx, elemLen);
+                float elemW = DrawSingleLineTextDirect(null, elemStr, 0f, 0f, font, ctx);
+                if (idx > 0 && accumW + elemW > maxW)
+                {
+                    break;
+                }
+                accumW += elemW;
+                idx += elemLen;
+                if (accumW >= maxW)
+                {
+                    break;
+                }
+            }
+
+            return Math.Clamp(idx, 1, span.Length);
+        }
+
+        private void DrawStickyPinnedChatWidget(SKCanvas canvas, ActivePinnedChatState pin, List<string> wrappedLines, int topY, int height, SectionRenderContext ctx)
+        {
+            int width = renderOptions.ChatWidth;
+            int padX = Math.Max(6, renderOptions.SidePadding);
+            int baseRowH = Math.Max(18, renderOptions.SectionHeight);
 
             DrawStickyCardBackground(canvas, topY, width, height, Purple);
 
             using var nameFontLocal = ctx.NameFont.Clone();
             nameFontLocal.TextSize = (float)Math.Max(9, renderOptions.FontSize * 0.82);
-            nameFontLocal.Color = SKColor.TryParse(pin.SenderColor, out var sc) ? sc : Purple;
+            nameFontLocal.Color = ResolveUsernameColor(pin.SenderColor, pin.SenderDisplayName, SKColors.White);
 
             using var msgFontLocal = ctx.MessageFont.Clone();
             msgFontLocal.TextSize = (float)Math.Max(9, renderOptions.FontSize * 0.82);
             msgFontLocal.Color = SKColors.White;
 
-            float baselineY = topY + height * 0.62f;
-            float curX = padX + 4;
+            wrappedLines ??= LayoutStickyPinnedChat(pin, ctx, out _);
+            int lineCount = Math.Max(1, wrappedLines.Count);
 
+            SKRect capBounds = new();
+            msgFontLocal.MeasureText("H", ref capBounds);
+            float capH = capBounds.Height > 1f ? capBounds.Height : msgFontLocal.TextSize * 0.72f;
+            float lineStep = Math.Max(12f, Math.Max(msgFontLocal.TextSize * 1.28f, baseRowH * 0.72f));
+            float totalTextSpan = capH + (lineCount - 1) * lineStep;
+            float firstBaselineY = topY + (height - totalTextSpan) * 0.5f + capH;
+
+            float leftX = padX + 4;
             string prefix = $"📌 {pin.SenderDisplayName}: ";
-            curX = DrawSingleLineTextDirect(canvas, prefix, curX, baselineY, nameFontLocal, ctx);
+            float curX = DrawSingleLineTextDirect(canvas, prefix, leftX, firstBaselineY, nameFontLocal, ctx);
 
-            int remWidth = Math.Max(20, width - (int)curX - padX);
-            string clippedMsg = TruncateSingleLine(pin.MessageText, msgFontLocal, remWidth);
-            DrawSingleLineTextDirect(canvas, clippedMsg, curX, baselineY, msgFontLocal, ctx);
+            if (!string.IsNullOrEmpty(wrappedLines[0]))
+            {
+                DrawSingleLineTextDirect(canvas, wrappedLines[0], curX, firstBaselineY, msgFontLocal, ctx);
+            }
+
+            for (int i = 1; i < lineCount; i++)
+            {
+                float lineBaselineY = firstBaselineY + i * lineStep;
+                DrawSingleLineTextDirect(canvas, wrappedLines[i], leftX, lineBaselineY, msgFontLocal, ctx);
+            }
         }
 
         private void DrawStickyHypeTrainWidget(SKCanvas canvas, ActiveHypeTrainState ht, int topY, int height, SectionRenderContext ctx)

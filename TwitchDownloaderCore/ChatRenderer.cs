@@ -270,6 +270,7 @@ namespace TwitchDownloaderCore
             await Task.Run(() => FetchScaledImages(cancellationToken), cancellationToken).ConfigureAwait(false);
 
             RemoveRestrictedComments(chatRoot.comments);
+            EnsureCommentsSortedChronologically(chatRoot.comments);
 
             if (renderOptions.DisperseCommentOffsets)
             {
@@ -2512,6 +2513,10 @@ namespace TwitchDownloaderCore
                 comment.message.emoticons = [];
                 comment.message.bits_spent = 0;
             }
+            else if (renderOptions.RenderReplies && comment.event_data?.reply != null)
+            {
+                comment = StripRedundantReplyLeadingMention(comment);
+            }
 
             AddImageSection(sectionImages, ref drawPos, defaultPos);
             defaultPos.Y = sectionDefaultYPos;
@@ -3634,11 +3639,50 @@ namespace TwitchDownloaderCore
             return measure.Width;
         }
 
+        private static SKColor GetDefaultUsernameColor(string displayName)
+        {
+            if (string.IsNullOrEmpty(displayName))
+            {
+                return DefaultUsernameColors[0];
+            }
+
+            uint hash = (uint)displayName.GetHashCode();
+            return DefaultUsernameColors[hash % (uint)DefaultUsernameColors.Length];
+        }
+
+        private static SKColor ResolveUsernameColor(string rawColorHex, string displayName, SKColor messageColor)
+        {
+            if (string.IsNullOrWhiteSpace(rawColorHex) || !SKColor.TryParse(rawColorHex, out var userColor))
+            {
+                return GetDefaultUsernameColor(displayName);
+            }
+
+            if (messageColor.RelativeLuminance() > 0.7)
+            {
+                // Exact #FFFFFF: pick a deterministic palette color from Twitch's DefaultUsernameColors
+                if (userColor.Red == 255 && userColor.Green == 255 && userColor.Blue == 255)
+                {
+                    return GetDefaultUsernameColor(displayName);
+                }
+
+                // Near-white custom colors: clamp lightness so the username remains visually distinct from white message text
+                userColor.ToHsl(out var h, out var s, out var l);
+                if (s <= 25f && l > 72f)
+                {
+                    userColor = SKColor.FromHsl(h, s, 72f);
+                }
+                else if (l > 76f)
+                {
+                    userColor = SKColor.FromHsl(h, Math.Max(s, 45f), 76f);
+                }
+            }
+
+            return userColor;
+        }
+
         private void DrawUsername(Comment comment, List<SectionImage> sectionImages, ref Point drawPos, Point defaultPos, SectionRenderContext ctx, bool appendColon = true, SKColor? colorOverride = null, int commentIndex = 0)
         {
-            var userColor = colorOverride ?? (comment.message.user_color is not null
-                ? SKColor.Parse(comment.message.user_color)
-                : DefaultUsernameColors[Math.Abs(comment.commenter.display_name.GetHashCode()) % DefaultUsernameColors.Length]);
+            var userColor = colorOverride ?? ResolveUsernameColor(comment.message.user_color, comment.commenter.display_name, renderOptions.MessageColor);
 
             if (colorOverride is null && renderOptions.AdjustUsernameVisibility)
             {
