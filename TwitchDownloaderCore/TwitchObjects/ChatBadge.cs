@@ -1,5 +1,6 @@
-﻿using SkiaSharp;
+using SkiaSharp;
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace TwitchDownloaderCore.TwitchObjects
@@ -17,6 +18,7 @@ namespace TwitchDownloaderCore.TwitchObjects
         PrimeGaming = 128
     }
 
+    [JsonConverter(typeof(ChatBadgeDataJsonConverter))]
     public class ChatBadgeData
     {
         public string title { get; set; }
@@ -26,6 +28,102 @@ namespace TwitchDownloaderCore.TwitchObjects
         public SKCodec Codec { get; set; }
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string url { get; set; }
+    }
+
+    /// <summary>
+    /// Reads <see cref="ChatBadgeData"/> from either modern v1.2.3+ JSON objects or legacy v1.2.2 Base64 byte strings
+    /// so <see cref="Chat.ChatJson"/> can stream-deserialize any schema version in a single pass without a DOM buffer.
+    /// </summary>
+    public sealed class ChatBadgeDataJsonConverter : JsonConverter<ChatBadgeData>
+    {
+        public override ChatBadgeData Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+            {
+                return null;
+            }
+
+            // Legacy schema <= 1.2.2: versions dictionary values were raw Base64 strings (byte[])
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                return new ChatBadgeData
+                {
+                    bytes = reader.GetBytesFromBase64()
+                };
+            }
+
+            if (reader.TokenType != JsonTokenType.StartObject)
+            {
+                throw new JsonException($"Unexpected token {reader.TokenType} when parsing {nameof(ChatBadgeData)}.");
+            }
+
+            var data = new ChatBadgeData();
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndObject)
+                {
+                    return data;
+                }
+
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                {
+                    continue;
+                }
+
+                if (reader.ValueTextEquals("bytes"u8))
+                {
+                    reader.Read();
+                    data.bytes = reader.TokenType == JsonTokenType.Null ? null : reader.GetBytesFromBase64();
+                }
+                else if (reader.ValueTextEquals("title"u8))
+                {
+                    reader.Read();
+                    data.title = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
+                }
+                else if (reader.ValueTextEquals("description"u8))
+                {
+                    reader.Read();
+                    data.description = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
+                }
+                else if (reader.ValueTextEquals("url"u8))
+                {
+                    reader.Read();
+                    data.url = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
+                }
+                else
+                {
+                    reader.Read();
+                    reader.Skip();
+                }
+            }
+
+            throw new JsonException($"Incomplete JSON object when parsing {nameof(ChatBadgeData)}.");
+        }
+
+        public override void Write(Utf8JsonWriter writer, ChatBadgeData value, JsonSerializerOptions options)
+        {
+            if (value is null)
+            {
+                writer.WriteNullValue();
+                return;
+            }
+
+            writer.WriteStartObject();
+            if (value.title is null) writer.WriteNull("title"u8);
+            else writer.WriteString("title"u8, value.title);
+
+            if (value.description is null) writer.WriteNull("description"u8);
+            else writer.WriteString("description"u8, value.description);
+
+            if (value.bytes is null) writer.WriteNull("bytes"u8);
+            else writer.WriteBase64String("bytes"u8, value.bytes);
+
+            if (value.url is not null)
+            {
+                writer.WriteString("url"u8, value.url);
+            }
+            writer.WriteEndObject();
+        }
     }
 
     [DebuggerDisplay("{Name}")]

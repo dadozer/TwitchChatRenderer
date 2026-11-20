@@ -18,4 +18,8 @@
       <ProjectReference Include="..\TwitchDownloaderCore\TwitchDownloaderCore.csproj" />
     </ItemGroup>
 
+    <ItemGroup Label="ExcludeRemovedLegacyTests">
+      <Compile Remove="ModelTests\M3U8*.cs;ToolTests\IdParseTests.cs" />
+    </ItemGroup>
+
 </Project>

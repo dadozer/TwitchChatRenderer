@@ -48,183 +48,6 @@ namespace TwitchDownloaderCore
 
         private const string SEVEN_TV_PROXY_HOST = "7tv-imageproxy.twitcharchives.workers.dev";
 
-        public static async Task<GqlVideoResponse> GetVideoInfo(long videoId)
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"query\":\"query{video(id:\\\"" + videoId + "\\\"){title,thumbnailURLs(height:180,width:320),createdAt,lengthSeconds,owner{id,displayName,login},viewCount,game{id,displayName,boxArtURL},description,status}}\",\"variables\":{}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kimne78kx3ncx6brgo4mv6wki5h1ko");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<GqlVideoResponse>();
-        }
-
-        public static async Task<GqlVideoTokenResponse> GetVideoToken(long videoId, string authToken)
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"operationName\":\"PlaybackAccessToken_Template\",\"query\":\"query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) {  streamPlaybackAccessToken(channelName: $login, params: {platform: \\\"web\\\", playerBackend: \\\"mediaplayer\\\", playerType: $playerType}) @include(if: $isLive) {    value    signature    __typename  }  videoPlaybackAccessToken(id: $vodID, params: {platform: \\\"web\\\", playerBackend: \\\"mediaplayer\\\", playerType: $playerType}) @include(if: $isVod) {    value    signature    __typename  }}\",\"variables\":{\"isLive\":false,\"login\":\"\",\"isVod\":true,\"vodID\":\"" + videoId + "\",\"playerType\":\"embed\"}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kimne78kx3ncx6brgo4mv6wki5h1ko");
-            if (!string.IsNullOrWhiteSpace(authToken))
-                request.Headers.Add("Authorization", $"OAuth {authToken}");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<GqlVideoTokenResponse>();
-        }
-
-        public static async Task<string> GetVideoPlaylist(long videoId, string token, string sig)
-        {
-            HttpRequestMessage request;
-            HttpResponseMessage response;
-            try
-            {
-                request = new HttpRequestMessage()
-                {
-                    RequestUri = new Uri($"https://usher.ttvnw.net/vod/v2/{videoId}.m3u8?sig={sig}&token={token}&allow_source=true&allow_audio_only=true&include_unavailable=true&platform=web&player_backend=mediaplayer&playlist_include_framerate=true&supported_codecs=av1,h265,h264"),
-                    Method = HttpMethod.Get
-                };
-                response = await httpClient.SendAsync(request);
-            }
-            catch (Exception ex)
-            {
-                if (IsAuthException(ex))
-                {
-                    request = new HttpRequestMessage()
-                    {
-                        RequestUri = new Uri($"https://twitch-downloader-proxy.twitcharchives.workers.dev/v2/{videoId}.m3u8?sig={sig}&token={token}&allow_source=true&allow_audio_only=true&include_unavailable=true&platform=web&player_backend=mediaplayer&playlist_include_framerate=true&supported_codecs=av1,h265,h264"),
-                        Method = HttpMethod.Get
-                    };
-                    response = await httpClient.SendAsync(request);
-                }
-                else
-                {
-                    throw;
-                }
-            }
-
-            if (response.StatusCode == HttpStatusCode.Forbidden)
-            {
-                // Twitch returns 403 Forbidden for (some? all?) sub-only VODs when correct authorization is not provided
-                var forbiddenResponse = await response.Content.ReadAsStringAsync();
-                if (forbiddenResponse.Contains("vod_manifest_restricted") || forbiddenResponse.Contains("unauthorized_entitlements"))
-                {
-                    // Return the error string so the caller can choose their error strategy
-                    // TODO: We may want to eventually return all 403 responses so the error messages can be parsed and/or logged since more potential errors exist
-                    return forbiddenResponse;
-                }
-            }
-
-            response.EnsureSuccessStatusCode();
-
-            return await response.Content.ReadAsStringAsync();
-        }
-
-        private static bool IsAuthException(Exception ex)
-        {
-            while (ex != null)
-            {
-                if (ex is System.Security.Authentication.AuthenticationException)
-                {
-                    return true;
-                }
-                ex = ex.InnerException;
-            }
-            return false;
-        }
-
-        public static async Task<GqlClipResponse> GetClipInfo(object clipId)
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"query\":\"query{clip(slug:\\\"" + clipId + "\\\"){title,thumbnailURL,createdAt,curator{id,displayName,login},durationSeconds,broadcaster{id,displayName,login},videoOffsetSeconds,video{id},viewCount,game{id,displayName,boxArtURL}}}\",\"variables\":{}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kimne78kx3ncx6brgo4mv6wki5h1ko");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<GqlClipResponse>();
-        }
-
-        public static async Task<GqlClipTokenResponse> GetClipLinks(string clipId)
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"operationName\":\"VideoAccessToken_Clip\",\"variables\":{\"slug\":\"" + clipId + "\"},\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"36b89d2507fce29e5ca551df756d27c1cfe079e2609642b4390aa4c35796eb11\"}}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kimne78kx3ncx6brgo4mv6wki5h1ko");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-
-            var gqlClipTokenResponses = await response.Content.ReadFromJsonAsync<GqlClipTokenResponse>();
-            if (gqlClipTokenResponses.data.clip.videoQualities is { Length: > 0 })
-            {
-                Array.Sort(gqlClipTokenResponses.data.clip.videoQualities, new ClipQualityComparer());
-            }
-
-            return gqlClipTokenResponses;
-        }
-
-        public static async Task<GqlShareClipRenderStatusResponse> GetShareClipRenderStatus(string clipId)
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"operationName\":\"ShareClipRenderStatus\",\"variables\":{\"slug\":\"" + clipId + "\"},\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"66038e29eb00d8fd115b0ce1a1382dd9d41168739b08bc87dc042af6a730541f\"}}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kimne78kx3ncx6brgo4mv6wki5h1ko");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-
-            var renderStatusResponse = await response.Content.ReadFromJsonAsync<GqlShareClipRenderStatusResponse>();
-            if (renderStatusResponse.data.clip.assets is not null)
-            {
-                foreach (var asset in renderStatusResponse.data.clip.assets)
-                {
-                    Array.Sort(asset.videoQualities, new ClipVideoQualityComparer());
-                }
-            }
-
-            return renderStatusResponse;
-        }
-
-        public static async Task<GqlVideoSearchResponse> GetGqlVideos(string channelName, string cursor = "", int limit = 50, string type = "")
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"query\":\"query{user(login:\\\"" + channelName + "\\\"){videos(first: " + limit + "" + (cursor == "" ? "" : ",after:\\\"" + cursor + "\\\"") + (type == "" ? "" : ",type:" + type) + ") { edges { node { title, id, lengthSeconds, previewThumbnailURL(height: 180, width: 320), createdAt, viewCount, game { id, displayName } }, cursor }, pageInfo { hasNextPage, hasPreviousPage }, totalCount }}}\",\"variables\":{}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kd1unb4b3q4t58fwlpcbzcbnm76a8fp");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<GqlVideoSearchResponse>();
-        }
-
-        public static async Task<GqlClipSearchResponse> GetGqlClips(string channelName, string period = "LAST_WEEK", string cursor = "", int limit = 50)
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"query\":\"query{user(login:\\\"" + channelName + "\\\"){clips(first: " + limit + (cursor == "" ? "" : ", after: \\\"" + cursor + "\\\"") + ", criteria: { period: " + period + " }) {  edges { cursor, node { id, slug, title, createdAt, curator, { id, displayName }, durationSeconds, thumbnailURL, viewCount, game { id, displayName } } }, pageInfo { hasNextPage, hasPreviousPage } }}}\",\"variables\":{}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kd1unb4b3q4t58fwlpcbzcbnm76a8fp");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<GqlClipSearchResponse>();
-        }
-
         public static async Task<EmoteResponse> GetThirdPartyEmotesMetadata(int streamerId, bool getBttv, bool getFfz, bool getStv, bool allowUnlistedEmotes, string cacheFolder, bool offline, ITaskLogger logger,
             CancellationToken cancellationToken = default)
         {
@@ -806,9 +629,9 @@ namespace TwitchDownloaderCore
                         {
                             searchResults[title] = await GiphyResolver.ResolveAsync(title, logger, token);
                         }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
                         {
-                            logger.LogVerbose($"An exception occurred while searching Giphy for '{title}': {ex.Message}.");
+                            logger?.LogVerbose($"An exception occurred while searching Giphy for '{title}': {ex.Message}.");
                         }
 
                         reportProgress?.Invoke(Interlocked.Increment(ref completed) * 100 / pending.Count);
@@ -1320,107 +1143,6 @@ namespace TwitchDownloaderCore
             return badges.Values.ToList();
         }
 
-        /// <summary>
-        /// Ensures that the requested emoji vendor archive is extracted to disk and returns the paths of all emoji PNG files
-        /// without eagerly decoding all ~3,689 bitmaps into memory.
-        /// </summary>
-        public static async Task<string[]> GetEmojiFilesAsync(string cacheFolder, EmojiVendor emojiVendor, CancellationToken cancellationToken = default)
-        {
-            if (emojiVendor == EmojiVendor.None)
-                return [];
-
-            var emojiFolder = Path.Combine(cacheFolder, "emojis", emojiVendor.EmojiFolder());
-            if (!Directory.Exists(emojiFolder))
-                CreateDirectory(emojiFolder);
-
-            var enumerationOptions = new EnumerationOptions { MatchType = MatchType.Simple, MatchCasing = MatchCasing.CaseInsensitive };
-            var emojiFiles = Directory.GetFiles(emojiFolder, "*.png", enumerationOptions);
-
-            if (emojiFiles.Length < emojiVendor.EmojiCount())
-            {
-                var emojiZipPath = Path.Combine(emojiFolder, Path.GetRandomFileName());
-                try
-                {
-                    using (var ms = emojiVendor.MemoryStream())
-                    {
-                        await using var fs = File.OpenWrite(emojiZipPath);
-                        await ms.CopyToAsync(fs, cancellationToken);
-                    }
-
-                    await using var archive = await ZipFile.OpenReadAsync(emojiZipPath, cancellationToken);
-                    var emojiAssetsPath = emojiVendor.AssetPath();
-                    var sep = emojiVendor.UnicodeSequenceSeparator();
-                    var emojis = archive.Entries
-                        .Where(x => !string.IsNullOrWhiteSpace(x.Name)
-                                    && Path.GetDirectoryName(x.FullName) is { } dir
-                                    && dir.EndsWith(emojiAssetsPath));
-
-                    foreach (var emoji in emojis)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-
-                        var filePath = Path.Combine(emojiFolder, emoji.Name.ToUpper().Replace(sep, ' '));
-                        if (!File.Exists(filePath))
-                        {
-                            try
-                            {
-                                // ReSharper disable once MethodHasAsyncOverloadWithCancellation
-                                // ExtractToFileAsync is extremely slow
-                                emoji.ExtractToFile(filePath);
-                            }
-                            catch { /* Being written by a parallel process? */ }
-                        }
-                    }
-
-                    emojiFiles = Directory.GetFiles(emojiFolder, "*.png", enumerationOptions);
-                }
-                finally
-                {
-                    if (File.Exists(emojiZipPath))
-                    {
-                        File.Delete(emojiZipPath);
-                    }
-                }
-            }
-
-            return emojiFiles;
-        }
-
-        public static async Task<Dictionary<string, SKBitmap>> GetEmojis(string cacheFolder, EmojiVendor emojiVendor, ITaskLogger logger, CancellationToken cancellationToken = default)
-        {
-            var returnCache = new Dictionary<string, SKBitmap>();
-
-            if (emojiVendor == EmojiVendor.None)
-                return returnCache;
-
-            var emojiFiles = await GetEmojiFilesAsync(cacheFolder, emojiVendor, cancellationToken);
-            var failedToDecode = 0;
-
-            foreach (var emojiPath in emojiFiles)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                await using var fs = File.OpenRead(emojiPath);
-                var emojiImage = SKBitmap.Decode(fs);
-
-                if (emojiImage is null)
-                {
-                    failedToDecode++;
-                    logger.LogVerbose($"Failed to decode emoji {Path.GetFileName(emojiPath)}, skipping.");
-                    continue;
-                }
-
-                returnCache.Add(Path.GetFileNameWithoutExtension(emojiPath), emojiImage);
-            }
-
-            if (failedToDecode > 0)
-            {
-                logger.LogWarning($"{failedToDecode} emojis failed to decode.");
-            }
-
-            return returnCache;
-        }
-
         public static async Task<List<CheerEmote>> GetBits(List<Comment> comments, string cacheFolder, string channelId, ITaskLogger logger, EmbeddedData embeddedData = null, bool offline = false, CancellationToken cancellationToken = default)
         {
             var bits = new Dictionary<string, CheerEmote>();
@@ -1570,7 +1292,7 @@ namespace TwitchDownloaderCore
             var urls = new HashSet<string>(defaultAvatars ?? []);
             foreach (var comment in comments)
             {
-                var logo = comment.commenter.logo;
+                var logo = comment?.commenter?.logo;
                 if (string.IsNullOrWhiteSpace(logo))
                     continue;
 
@@ -1738,86 +1460,24 @@ namespace TwitchDownloaderCore
             return fileSystemInfo;
         }
 
-        [GeneratedRegex(@"\d+_\d+$", RegexOptions.RightToLeft)]
-        private static partial Regex VideoFolderRegex { get; }
-
-        /// <summary>
-        /// Cleans up any unmanaged cache files from previous runs that were interrupted before cleaning up
-        /// </summary>
-        public static async Task CleanupAbandonedVideoCaches(string cacheFolder, Func<DirectoryInfo[], DirectoryInfo[]> itemsToDeleteCallback, ITaskLogger logger)
-        {
-            if (!Directory.Exists(cacheFolder))
-            {
-                return;
-            }
-
-            if (itemsToDeleteCallback == null)
-            {
-                logger.LogWarning($"{nameof(itemsToDeleteCallback)} was null.");
-                return;
-            }
-
-            var allCacheDirectories = Directory.GetDirectories(cacheFolder);
-
-            var oldVideoCaches = allCacheDirectories
-                .Where(directory => VideoFolderRegex.IsMatch(directory))
-                .Select(directory => new DirectoryInfo(directory))
-                .Where(directoryInfo => DateTime.UtcNow.Ticks - directoryInfo.LastWriteTimeUtc.Ticks > TimeSpan.TicksPerDay * 7)
-                .ToArray();
-
-            if (oldVideoCaches.Length == 0)
-            {
-                return;
-            }
-
-            var toDelete = await Task.Run(() => itemsToDeleteCallback(oldVideoCaches));
-
-            if (toDelete == null || toDelete.Length == 0)
-            {
-                return;
-            }
-
-            var wasDeleted = 0;
-            foreach (var directory in toDelete)
-            {
-                try
-                {
-                    Directory.Delete(directory.FullName, true);
-                    wasDeleted++;
-                    logger.LogVerbose($"Deleted '{directory.FullName}' successfully.");
-                }
-                catch (Exception e)
-                {
-                    logger.LogVerbose($"Could not delete '{directory.FullName}': {e.Message}.");
-                }
-            }
-
-            logger.LogInfo(toDelete.Length == wasDeleted
-                ? $"{wasDeleted} old video caches were deleted."
-                : $"{wasDeleted} old video caches were deleted, {toDelete.Length - wasDeleted} could not be deleted.");
-        }
-
-        public static async Task<GqlUserIdResponse> GetUserIds(IEnumerable<string> nameList)
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"query\":\"query{users(logins:[" + string.Join(",", nameList.Select(x => "\\\"" + x + "\\\"").ToArray()) + "]){id}}\",\"variables\":{}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kimne78kx3ncx6brgo4mv6wki5h1ko");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<GqlUserIdResponse>();
-        }
-
         public static async Task<GqlUserInfoResponse> GetUserInfo(IEnumerable<string> idList)
         {
+            var sanitizedIds = (idList ?? [])
+                .Where(static id => !string.IsNullOrWhiteSpace(id) && id.All(char.IsAsciiDigit))
+                .Distinct(StringComparer.Ordinal)
+                .Select(static id => $"\\\"{JsonEncodedText.Encode(id)}\\\"")
+                .ToArray();
+
+            if (sanitizedIds.Length == 0)
+            {
+                return new GqlUserInfoResponse { data = new UserInfoData { users = [] } };
+            }
+
             var request = new HttpRequestMessage()
             {
                 RequestUri = new Uri("https://gql.twitch.tv/gql"),
                 Method = HttpMethod.Post,
-                Content = new StringContent("{\"query\":\"query{users(ids:[" + string.Join(",", idList.Select(x => "\\\"" + x + "\\\"").ToArray()) + "]){id,displayName,login,createdAt,updatedAt,description,profileImageURL(width:70)}}\",\"variables\":{}}", Encoding.UTF8, "application/json")
+                Content = new StringContent("{\"query\":\"query{users(ids:[" + string.Join(",", sanitizedIds) + "]){id,displayName,login,createdAt,updatedAt,description,profileImageURL(width:70)}}\",\"variables\":{}}", Encoding.UTF8, "application/json")
             };
             request.Headers.Add("Client-ID", "kimne78kx3ncx6brgo4mv6wki5h1ko");
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
@@ -1850,7 +1510,7 @@ namespace TwitchDownloaderCore
                             return (fileBytes, codec, true);
                         }
 
-                        logger.LogVerbose($"Failed to decode {Path.GetFileName(filePath)} from cache: {result}");
+                        logger?.LogVerbose($"Failed to decode {Path.GetFileName(filePath)} from cache: {result}");
                     }
 
                     // Delete the corrupted image
@@ -1859,7 +1519,7 @@ namespace TwitchDownloaderCore
                 catch (Exception e) when (e is IOException or SecurityException)
                 {
                     // File being written to by parallel process? Maybe. Can just fall back to HTTP request.
-                    logger.LogVerbose($"Failed to read from or delete {Path.GetFileName(filePath)}: {e.Message}");
+                    logger?.LogVerbose($"Failed to read from or delete {Path.GetFileName(filePath)}: {e.Message}");
                 }
             }
 
@@ -1877,7 +1537,7 @@ namespace TwitchDownloaderCore
             }
             catch (Exception ex)
             {
-                logger.LogVerbose($"Failed to save {Path.GetFileName(filePath)} to cache: {ex.Message}");
+                logger?.LogVerbose($"Failed to save {Path.GetFileName(filePath)} to cache: {ex.Message}");
             }
 
             return (imageBytes, null, false);
@@ -1895,114 +1555,6 @@ namespace TwitchDownloaderCore
 
             var (bytes, codec, _) = await GetImageInternalAsync(cacheDir, url, imageId, imageScale, imageType, offline, logger, cancellationToken).ConfigureAwait(false);
             return (bytes, codec);
-        }
-
-        /// <remarks>When a given video has only 1 chapter, data.video.moments.edges will be empty.</remarks>
-        public static async Task<GqlVideoChapterResponse> GetVideoChapters(long videoId)
-        {
-            var request = new HttpRequestMessage()
-            {
-                RequestUri = new Uri("https://gql.twitch.tv/gql"),
-                Method = HttpMethod.Post,
-                Content = new StringContent("{\"extensions\":{\"persistedQuery\":{\"sha256Hash\":\"71835d5ef425e154bf282453a926d99b328cdc5e32f36d3a209d0f4778b41203\",\"version\":1}},\"operationName\":\"VideoPlayer_ChapterSelectButtonVideo\",\"variables\":{\"videoID\":\"" + videoId + "\"}}", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("Client-ID", "kimne78kx3ncx6brgo4mv6wki5h1ko");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-
-            var chapterResponse = await response.Content.ReadFromJsonAsync<GqlVideoChapterResponse>();
-            chapterResponse.data.video ??= new ChapterVideo { id = videoId.ToString() };
-            chapterResponse.data.video.moments ??= new VideoMomentConnection { edges = [] };
-
-            // For some reason durations can be negative sometimes
-            foreach (var edge in chapterResponse.data.video.moments.edges)
-            {
-                if (edge.node.durationMilliseconds < 0)
-                {
-                    edge.node.durationMilliseconds = 0;
-                }
-            }
-
-            // When downloading VODs of currently-airing streams, the last chapter lacks a duration
-            if (chapterResponse.data.video.moments.edges.LastOrDefault() is { } lastEdge && lastEdge.node.durationMilliseconds is 0)
-            {
-                lastEdge.node.durationMilliseconds = lastEdge.node.video.lengthSeconds * 1000 - lastEdge.node.positionMilliseconds;
-            }
-
-            return chapterResponse;
-        }
-
-        public static async Task<GqlVideoChapterResponse> GetOrGenerateVideoChapters(long videoId, VideoInfo videoInfo, ITaskLogger logger)
-        {
-            GqlVideoChapterResponse chapterResponse;
-            try
-            {
-                chapterResponse = await GetVideoChapters(videoId);
-            }
-            catch (NullReferenceException ex)
-            {
-                logger.LogError($"Null object reference while fetching chapters: {ex.StackTrace}");
-
-                chapterResponse = new GqlVideoChapterResponse
-                {
-                    data = new ChapterData
-                    {
-                        video = new ChapterVideo
-                        {
-                            id = videoId.ToString(),
-                            moments = new VideoMomentConnection
-                            {
-                                edges = []
-                            }
-                        }
-                    }
-                };
-            }
-
-            // Video has only 1 chapter, generate a bogus video chapter with the information we have available.
-            if (chapterResponse.data.video.moments.edges.Count == 0)
-            {
-                chapterResponse.data.video.moments.edges.Add(
-                    GenerateVideoMomentEdge(0, videoInfo.lengthSeconds, videoInfo.game?.id, videoInfo.game?.displayName, videoInfo.game?.displayName, videoInfo.game?.boxArtURL
-                    ));
-            }
-
-            return chapterResponse;
-        }
-
-        public static VideoMomentEdge GenerateClipChapter(ShareClipRenderStatusClip clipInfo)
-        {
-            return GenerateVideoMomentEdge(0, clipInfo.durationSeconds, clipInfo.game?.id, clipInfo.game?.displayName, clipInfo.game?.displayName, clipInfo.game?.boxArtURL);
-        }
-
-        private static VideoMomentEdge GenerateVideoMomentEdge(int startSeconds, int lengthSeconds, string gameId = null, string gameDisplayName = null, string gameDescription = null, string gameBoxArtUrl = null)
-        {
-            gameId ??= "-1";
-            gameDisplayName ??= "Unknown";
-            gameDescription ??= "Unknown";
-            gameBoxArtUrl ??= "";
-
-            return new VideoMomentEdge
-            {
-                node = new VideoMoment
-                {
-                    id = "",
-                    _type = "GAME_CHANGE",
-                    positionMilliseconds = startSeconds,
-                    durationMilliseconds = lengthSeconds * 1000,
-                    description = gameDescription,
-                    subDescription = "",
-                    details = new GameChangeMomentDetails
-                    {
-                        game = new Game
-                        {
-                            id = gameId,
-                            displayName = gameDisplayName,
-                            boxArtURL = gameBoxArtUrl.Replace("{width}", "40").Replace("{height}", "53")
-                        }
-                    }
-                }
-            };
         }
 
         public static int SnapResizeHeight(int desiredHeight, int upSnapThreshold, int downSnapThreshold, int imageHeight)

@@ -21,15 +21,6 @@ namespace TwitchDownloaderCLI.Models
         Prompt,
     }
 
-    public enum InfoPrintFormat
-    {
-        Raw,
-        Table,
-        M3U8,
-        M3U = M3U8,
-        Json
-    }
-
     public enum UserPromptResult
     {
         Unknown,

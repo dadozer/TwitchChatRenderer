@@ -506,5 +506,13 @@ namespace TwitchDownloaderCore.TwitchObjects
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<ChatBroadcastEvent> events { get; set; } = new();
         public EmbeddedData embeddedData { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("emotes")]
+        public EmbeddedData LegacyEmotes
+        {
+            get => null;
+            set => embeddedData ??= value;
+        }
     }
 }

@@ -22,10 +22,26 @@ const DOWNLOADABLE_FILES = {
   'ChatRenderArgs.cs': 'TwitchDownloaderCLI/Modes/Arguments/ChatRenderArgs.cs',
   'RenderChat.cs': 'TwitchDownloaderCLI/Modes/RenderChat.cs',
   'ChatRenderer.cs': 'TwitchDownloaderCore/ChatRenderer.cs',
+  'CanonicalTimeline.cs': 'TwitchDownloaderCore/Chat/Timeline/CanonicalTimeline.cs',
+  'TimelineCompiler.cs': 'TwitchDownloaderCore/Chat/Timeline/TimelineCompiler.cs',
+  'AssetCatalog.cs': 'TwitchDownloaderCore/Rendering/AssetCatalog.cs',
+  'TextLayoutEngine.cs': 'TwitchDownloaderCore/Rendering/TextLayoutEngine.cs',
+  'MessageSectionRenderer.cs': 'TwitchDownloaderCore/Rendering/MessageSectionRenderer.cs',
+  'StickyOverlayRenderer.cs': 'TwitchDownloaderCore/Rendering/StickyOverlayRenderer.cs',
+  'SegmentCompositor.cs': 'TwitchDownloaderCore/Rendering/SegmentCompositor.cs',
+  'SimdPixelConverter.cs': 'TwitchDownloaderCore/Rendering/SimdPixelConverter.cs',
+  'EmoteSurfaceCache.cs': 'TwitchDownloaderCore/Rendering/EmoteSurfaceCache.cs',
+  'SegmentPartitioner.cs': 'TwitchDownloaderCore/Rendering/SegmentPartitioner.cs',
+  'EncodingProfile.cs': 'TwitchDownloaderCore/Rendering/Encoding/EncodingProfile.cs',
+  'FfmpegPipelineBuilder.cs': 'TwitchDownloaderCore/Rendering/Encoding/FfmpegPipelineBuilder.cs',
+  'FfmpegEncodeCoordinator.cs': 'TwitchDownloaderCore/Rendering/FfmpegEncodeCoordinator.cs',
+  'ChatPreviewRenderer.cs': 'TwitchDownloaderCore/Rendering/ChatPreviewRenderer.cs',
+  'NutPipeMuxer.cs': 'TwitchDownloaderCore/Tools/NutPipeMuxer.cs',
   'GiphyResolver.cs': 'TwitchDownloaderCore/Tools/GiphyResolver.cs',
   'ImageMemoryBudget.cs': 'TwitchDownloaderCore/Models/Render/ImageMemoryBudget.cs',
   'TwitchEmote.cs': 'TwitchDownloaderCore/TwitchObjects/TwitchEmote.cs',
   'PageChatRender.xaml.cs': 'TwitchDownloaderWPF/PageChatRender.xaml.cs',
+  'GuiPreferences.cs': 'TwitchDownloaderWPF/Services/GuiPreferences.cs',
   'build-chatrender.yml': '.github/workflows/build-chatrender.yml',
 };
 
@@ -48,37 +64,55 @@ function getWorkspaceStatus() {
       name: '100% Drop-In TwitchDownloader CLI & Archive Compatibility',
       detail: 'PreParseArgs.cs + ChatRenderArgs.cs (Supports chatrender verb, direct flags, and legacy -m ChatRender)',
       verified:
-        checkSubstring('TwitchDownloaderCLI/Tools/PreParseArgs.cs', 'ChatRender') &&
+        checkSubstring('TwitchDownloaderCLI/Tools/PreParseArgs.cs', '"chatrender"') &&
         checkSubstring('TwitchDownloaderCLI/Modes/Arguments/ChatRenderArgs.cs', 'Verb("chatrender"'),
     },
     {
-      name: 'Parallel Timeline Segment Partitioning (-j / --jobs)',
-      detail: 'ChatRenderer.cs (RunParallelSegmentsAsync + RenderWorkerState + lossless ffmpeg -f concat -c copy)',
+      name: 'Immutable Canonical Timeline Compiler & Non-Mutating IR',
+      detail: 'TimelineCompiler.cs + CanonicalTimeline.cs (Pure ChatRoot -> CanonicalTimeline compilation, zero Comment.Clone)',
       verified:
-        checkSubstring('TwitchDownloaderCore/ChatRenderer.cs', 'RunParallelSegmentsAsync') &&
-        checkSubstring('TwitchDownloaderCore/ChatRenderer.cs', 'RenderWorkerState') &&
+        checkSubstring('TwitchDownloaderCore/Chat/Timeline/TimelineCompiler.cs', 'public static CanonicalTimeline Compile') &&
+        checkSubstring('TwitchDownloaderCore/Chat/Timeline/CanonicalTimeline.cs', 'public sealed class CanonicalTimeline'),
+    },
+    {
+      name: 'Cost-Weighted Parallel Segment Partitioning (-j / --jobs)',
+      detail: 'SegmentPartitioner.cs + FfmpegEncodeCoordinator.cs (ComputeCostWeightedSegments, ResolveAutoParallelJobs, lossless concat)',
+      verified:
+        checkSubstring('TwitchDownloaderCore/Rendering/SegmentPartitioner.cs', 'ComputeCostWeightedSegments') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/SegmentPartitioner.cs', 'ResolveAutoParallelJobs') &&
         checkSubstring('TwitchDownloaderCLI/Modes/Arguments/ChatRenderArgs.cs', 'Option(\'j\', "jobs"'),
     },
     {
-      name: 'Direct Planar YUV Pipeline & Pre-Converted EmoteYuvFrame Blitting',
-      detail: 'ChatRenderer.cs + TwitchEmote.cs (ConvertFrameToYuv420p, EmoteYuvFrame, BlitEmoteYuv420p)',
+      name: 'AVX2 / Vector128 Planar YUV, Zero-Div LUTs & Multi-Background EmoteSurfaceCache',
+      detail: 'SimdPixelConverter.cs + EmoteSurfaceCache.cs (Avx2 8x2 BT.601 kernel, AlphaUnpremulLut, BlitEmoteYuvFrame)',
       verified:
-        checkSubstring('TwitchDownloaderCore/ChatRenderer.cs', 'ConvertFrameToYuv420p') &&
-        checkSubstring('TwitchDownloaderCore/ChatRenderer.cs', 'BlitEmoteYuv420p') &&
-        checkSubstring('TwitchDownloaderCore/TwitchObjects/TwitchEmote.cs', 'EmoteYuvFrame'),
+        checkSubstring('TwitchDownloaderCore/Rendering/SimdPixelConverter.cs', 'AlphaUnpremulLut') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/SimdPixelConverter.cs', 'CreateRgbaWeights256') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/EmoteSurfaceCache.cs', 'GetOrCreateYuvFrames'),
     },
     {
-      name: 'O(1) Next-Transition Skip & Incremental Scroll Shifting',
-      detail: 'ChatRenderer.cs (AnimNextChangeTickMs short-circuiting & incremental UpdateFrame scrolling)',
+      name: 'Timestamped NUT (-f nut) Zero-Duplicate CFR Pipe & Sharpening Filter Composition',
+      detail: 'NutPipeMuxer.cs + DriveHelper.cs + FfmpegPipelineBuilder.cs (NUT VFR pipe preserved with --sharpening smartblur)',
       verified:
-        checkSubstring('TwitchDownloaderCore/ChatRenderer.cs', 'AnimNextChangeTickMs'),
+        checkSubstring('TwitchDownloaderCore/Tools/NutPipeMuxer.cs', 'internal sealed class NutPipeMuxer') &&
+        checkSubstring('TwitchDownloaderCore/Tools/DriveHelper.cs', 'WaitForDriveThrottled') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/Encoding/FfmpegPipelineBuilder.cs', 'CanUseNutPipe'),
     },
     {
-      name: 'WebM VP9 Alpha Multi-Threading & GOP Optimization',
-      detail: 'ChatRenderer.cs (OptimizeFfmpegOutputArgs, -row-mt 1, -cpu-used 8, dynamic -g <fps*8>)',
+      name: 'O(1) Next-Transition Skip, Incremental Scroll & Zero-Copy SectionImage',
+      detail: 'SegmentCompositor.cs + SimdPixelConverter.cs + CommentSection.cs (AnimNextChangeTickMs, ShiftYuvPlanesUp, SectionImage)',
       verified:
-        checkSubstring('TwitchDownloaderCore/ChatRenderer.cs', 'OptimizeFfmpegOutputArgs') &&
-        checkSubstring('TwitchDownloaderCore/ChatRenderer.cs', 'libvpx-vp9'),
+        checkSubstring('TwitchDownloaderCore/Rendering/SegmentCompositor.cs', 'AnimNextChangeTickMs') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/SimdPixelConverter.cs', 'ShiftYuvPlanesUp') &&
+        checkSubstring('TwitchDownloaderCore/Models/Render/CommentSection.cs', 'public SectionImage Image'),
+    },
+    {
+      name: 'Width-Aware WebM VP9 Alpha Multi-Threading & Canonical Codec Registry',
+      detail: 'FfmpegPipelineBuilder.cs + EncodingProfile.cs (OptimizeFfmpegOutputArgs, width-aware -tile-columns, FfmpegCodecPresets)',
+      verified:
+        checkSubstring('TwitchDownloaderCore/Rendering/Encoding/FfmpegPipelineBuilder.cs', 'tileColumnsLog2') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/Encoding/FfmpegPipelineBuilder.cs', 'libvpx-vp9') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/Encoding/EncodingProfile.cs', 'FfmpegCodecPresets'),
     },
     {
       name: 'Giphy Search & Title Resolver (--giphy, --gif-max-height-percent)',
@@ -88,24 +122,36 @@ function getWorkspaceStatus() {
         checkSubstring('TwitchDownloaderCLI/Modes/Arguments/ChatRenderArgs.cs', 'Option("giphy"'),
     },
     {
-      name: 'Lazy Frame Decoding & LRU Memory Budget (--image-cache-mb)',
-      detail: 'ImageMemoryBudget.cs + TwitchEmote.cs (ReleaseUnused off-screen eviction)',
+      name: 'Lazy Frame Decoding, Bounded GIF Scaling & LRU Budget (--image-cache-mb)',
+      detail: 'ImageMemoryBudget.cs + TwitchEmote.cs (16-frame chunked scaling, DecodeGeneration tracking, ReleaseUnused eviction)',
       verified:
         checkSubstring('TwitchDownloaderCore/Models/Render/ImageMemoryBudget.cs', 'public sealed class ImageMemoryBudget') &&
+        checkSubstring('TwitchDownloaderCore/TwitchObjects/TwitchEmote.cs', 'const int ChunkSize = 16') &&
         checkSubstring('TwitchDownloaderCore/TwitchObjects/TwitchEmote.cs', 'ReleaseFrames'),
     },
     {
-      name: 'Smart Embedded "Inter" Font Resolution & >2 GB Streaming JSON',
-      detail: 'ChatRenderer.cs (Inter Embedded fallback) + ChatJson.cs (DeserializeLargeAsync)',
+      name: 'SKTextBlob Line Batching, Strike-Cached Outlines & Async Lookahead',
+      detail: 'TextLayoutEngine.cs + SegmentCompositor.cs (FlushPendingLineText, ResolveAndCacheUsername, RunLookaheadProducerLoop)',
       verified:
-        checkSubstring('TwitchDownloaderCore/ChatRenderer.cs', 'Inter Embedded') &&
-        checkSubstring('TwitchDownloaderCore/Chat/ChatJson.cs', 'DeserializeLargeAsync'),
+        checkSubstring('TwitchDownloaderCore/Rendering/TextLayoutEngine.cs', 'FlushPendingLineText') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/TextLayoutEngine.cs', 'ResolveAndCacheUsername') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/SegmentCompositor.cs', 'RunLookaheadProducerLoop'),
     },
     {
-      name: 'Streamlined ChatRenderGUI.exe (WPF Desktop App)',
-      detail: 'TwitchDownloaderWPF/PageChatRender.xaml.cs (Live SkiaSharp preview, Parallel Segments, Direct Multi-File Batch Render)',
+      name: 'Source-Gen Single-Pass Streaming JSON, Smart "Inter" Font & In-Memory Zip Emojis',
+      detail: 'ChatJson.cs (ChatJsonContext + DeserializeFromStreamAsync, strict offline) + AssetCatalog.cs (OpenInMemoryEmojiArchive)',
+      verified:
+        checkSubstring('TwitchDownloaderCore/Rendering/TextLayoutEngine.cs', 'Inter Embedded') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/AssetCatalog.cs', 'OpenInMemoryEmojiArchive') &&
+        checkSubstring('TwitchDownloaderCore/Chat/ChatJson.cs', 'ChatJsonContext') &&
+        checkSubstring('TwitchDownloaderCore/Chat/ChatJson.cs', 'DeserializeFromStreamAsync'),
+    },
+    {
+      name: 'Streamlined ChatRenderGUI.exe with Unified Live Preview Pipeline',
+      detail: 'PageChatRender.xaml.cs + ChatPreviewRenderer.cs + GuiPreferences.cs (Real MessageSectionRenderer preview, Batch Render)',
       verified:
         checkSubstring('TwitchDownloaderWPF/PageChatRender.xaml.cs', 'numParallelJobs') &&
+        checkSubstring('TwitchDownloaderCore/Rendering/ChatPreviewRenderer.cs', 'MessageSectionRenderer') &&
         checkSubstring('TwitchDownloaderWPF/TwitchDownloaderWPF.csproj', 'ChatRenderGUI'),
     },
   ];
@@ -122,19 +168,39 @@ function getWorkspaceStatus() {
     '.github/workflows/build-chatrender.yml',
     'TwitchDownloaderCLI/Program.cs',
     'TwitchDownloaderCLI/Modes/Arguments/ChatRenderArgs.cs',
+    'TwitchDownloaderCLI/Modes/RenderChat.cs',
     'TwitchDownloaderCore/ChatRenderer.cs',
+    'TwitchDownloaderCore/Chat/ChatJson.cs',
+    'TwitchDownloaderCore/Chat/Timeline/CanonicalTimeline.cs',
+    'TwitchDownloaderCore/Chat/Timeline/TimelineCompiler.cs',
+    'TwitchDownloaderCore/Rendering/AssetCatalog.cs',
+    'TwitchDownloaderCore/Rendering/TextLayoutEngine.cs',
+    'TwitchDownloaderCore/Rendering/MessageSectionRenderer.cs',
+    'TwitchDownloaderCore/Rendering/StickyOverlayRenderer.cs',
+    'TwitchDownloaderCore/Rendering/SegmentCompositor.cs',
+    'TwitchDownloaderCore/Rendering/SimdPixelConverter.cs',
+    'TwitchDownloaderCore/Rendering/EmoteSurfaceCache.cs',
+    'TwitchDownloaderCore/Rendering/SegmentPartitioner.cs',
+    'TwitchDownloaderCore/Rendering/Encoding/EncodingProfile.cs',
+    'TwitchDownloaderCore/Rendering/Encoding/FfmpegPipelineBuilder.cs',
+    'TwitchDownloaderCore/Rendering/FfmpegEncodeCoordinator.cs',
+    'TwitchDownloaderCore/Rendering/ChatPreviewRenderer.cs',
+    'TwitchDownloaderCore/Tools/NutPipeMuxer.cs',
+    'TwitchDownloaderCore/Tools/DriveHelper.cs',
     'TwitchDownloaderCore/Tools/GiphyResolver.cs',
     'TwitchDownloaderCore/Models/Render/ImageMemoryBudget.cs',
     'TwitchDownloaderCore/TwitchObjects/TwitchEmote.cs',
     'TwitchDownloaderWPF/TwitchDownloaderWPF.csproj',
     'TwitchDownloaderWPF/PageChatRender.xaml',
     'TwitchDownloaderWPF/PageChatRender.xaml.cs',
+    'TwitchDownloaderWPF/Services/GuiPreferences.cs',
   ].map((relPath) => ({
     path: relPath,
     exists: fs.existsSync(path.join(__dirname, relPath)),
   }));
 
   const deletedFiles = [
+    'TwitchDownloaderCore/ChatRenderer.ExtendedEvents.cs',
     'TwitchDownloaderCLI/Modes/DownloadVideo.cs',
     'TwitchDownloaderCLI/Modes/DownloadClip.cs',
     'TwitchDownloaderCLI/Modes/DownloadChat.cs',
@@ -152,7 +218,6 @@ function getWorkspaceStatus() {
     'TwitchDownloaderWPF/PageChatUpdate.xaml',
     'TwitchDownloaderWPF/PageQueue.xaml',
     'TwitchDownloaderWPF/Themes/ (Theme bloat removed)',
-    'TwitchDownloaderWPF/Translations/ (Localization bloat removed)',
   ].map((relPath) => {
     const cleanRel = relPath.split(' ')[0];
     return {
@@ -515,11 +580,11 @@ const server = http.createServer((req, res) => {
         </div>
         <div class="field">
           <label for="cb-gif-height">Max GIF Height % (--gif-max-height-percent)</label>
-          <input id="cb-gif-height" type="number" min="10" max="100" value="50" />
+          <input id="cb-gif-height" type="number" min="1" max="100" value="33" />
         </div>
         <div class="field">
           <label for="cb-cache-mb">Off-Screen Frame Budget (--image-cache-mb)</label>
-          <input id="cb-cache-mb" type="number" min="32" max="8192" value="256" />
+          <input id="cb-cache-mb" type="number" min="16" max="8192" value="256" />
         </div>
       </div>
       <pre id="cb-preview">ChatRenderCLI.exe -i "chat.json" -o "chat.webm" -w 420 -h 1080 --framerate 60 --background-color "#00000000" --output-args "-c:v libvpx-vp9 -crf 18 -b:v 0 -pix_fmt yuva420p \"{save_path}\""</pre>
@@ -623,7 +688,7 @@ build-win-x64.bat
       const fps = document.getElementById('cb-fps').value || '60';
       const jobs = document.getElementById('cb-jobs').value || '0';
       const giphy = document.getElementById('cb-giphy').value;
-      const gifHeight = document.getElementById('cb-gif-height').value || '50';
+      const gifHeight = document.getElementById('cb-gif-height').value || '33';
       const cacheMb = document.getElementById('cb-cache-mb').value || '256';
 
       const verbPart = mode === 'verb' ? ' chatrender' : '';
@@ -636,7 +701,7 @@ build-win-x64.bat
       if (preset === 'webm-alpha') {
         cmd += ' --background-color "#00000000" --output-args "-c:v libvpx-vp9 -crf 18 -b:v 0 -pix_fmt yuva420p \\"{save_path}\\""';
       } else if (preset === 'prores-alpha') {
-        cmd += ' --background-color "#00000000" --output-args "-c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le \\"{save_path}\\""';
+        cmd += ' --background-color "#00000000" --output-args "-c:v prores_ks -profile:v 4 -qscale:v 11 -pix_fmt yuva444p10le \\"{save_path}\\""';
       } else if (preset === 'mp4-outline') {
         cmd += ' --outline --outline-size 3';
       }
@@ -644,7 +709,7 @@ build-win-x64.bat
       if (giphy === 'false') {
         cmd += ' --giphy false';
       }
-      if (gifHeight !== '50') {
+      if (gifHeight !== '33') {
         cmd += ' --gif-max-height-percent ' + gifHeight;
       }
       if (cacheMb !== '256') {

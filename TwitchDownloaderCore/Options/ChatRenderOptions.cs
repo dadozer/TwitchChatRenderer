@@ -12,11 +12,10 @@ namespace TwitchDownloaderCore.Options
         public string OutputFile { get; set; }
         public SKColor BackgroundColor { get; set; }
         public SKColor AlternateBackgroundColor { get; set; }
-        public SKPaint AlternateBackgroundPaint => field ??= new SKPaint { Color = AlternateBackgroundColor, BlendMode = SKBlendMode.Src };
         public bool AlternateMessageBackgrounds { get; set; }
         public SKColor HighlightUserColor { get; set; }
-        public SKPaint AlternateBackgroundHighlightUserPaint => field ??= new SKPaint { Color = HighlightUserColor.CompositeOver(HighlightUserColor), BlendMode = SKBlendMode.Src };
         public SKColor MessageColor { get; set; }
+        public bool Sharpening { get; set; }
         public int ChatHeight { get; set; }
         public int ChatWidth { get; set; }
         public bool BttvEmotes { get; set; }
@@ -118,5 +117,110 @@ namespace TwitchDownloaderCore.Options
         public bool RenderHypeChat { get; set; } = true;
         public bool RenderPowerUps { get; set; } = true;
         public bool RenderSharedChatBadge { get; set; } = true;
+
+        public static SKFontStyle ParseFontStyle(string style, string optionLabel = null, bool throwOnInvalid = false)
+        {
+            return (style ?? "normal").Trim().ToLowerInvariant() switch
+            {
+                "normal" => SKFontStyle.Normal,
+                "bold" => SKFontStyle.Bold,
+                "italic" or "italics" => SKFontStyle.Italic,
+                "bolditalic" or "bolditalics" => SKFontStyle.BoldItalic,
+                _ => throwOnInvalid
+                    ? throw new NotSupportedException($"Invalid {optionLabel ?? "font style"}. Valid values are: normal, bold, italic, and bolditalic.")
+                    : SKFontStyle.Normal
+            };
+        }
+
+        public static string NormalizeFontStyleName(string style)
+        {
+            return style?.Trim().ToLowerInvariant() switch
+            {
+                "bold" => "Bold",
+                "italic" or "italics" => "Italic",
+                "bolditalic" or "bolditalics" => "BoldItalic",
+                _ => "Normal"
+            };
+        }
+
+        public static EmojiVendor ParseEmojiVendor(string vendor)
+        {
+            return (vendor ?? "notocolor").Trim().ToLowerInvariant() switch
+            {
+                "twitter" or "twemoji" => EmojiVendor.TwitterTwemoji,
+                "google" or "notocolor" => EmojiVendor.GoogleNotoColor,
+                "system" or "none" => EmojiVendor.None,
+                _ => throw new NotSupportedException("Invalid emoji vendor. Valid values are: 'twitter' / 'twemoji', 'google' / 'notocolor', and 'system' / 'none'")
+            };
+        }
+
+        public static OverlayWidgetMode ParseOverlayWidgetMode(string value, string optionName)
+        {
+            return (value ?? "sticky").Trim().ToLowerInvariant() switch
+            {
+                "sticky" or "stickytop" or "top" => OverlayWidgetMode.StickyTop,
+                "scroll" or "chat" or "chatscroll" => OverlayWidgetMode.ChatScroll,
+                "off" or "none" or "false" or "disabled" => OverlayWidgetMode.Off,
+                _ => throw new NotSupportedException($"Invalid {optionName} '{value}'. Valid values are: sticky, scroll, and off.")
+            };
+        }
+
+        public static OverlayWidgetMode ParseOverlayWidgetSelection(int selectedIndex, OverlayWidgetMode fallback)
+        {
+            return selectedIndex switch
+            {
+                0 => OverlayWidgetMode.StickyTop,
+                1 => OverlayWidgetMode.ChatScroll,
+                2 => OverlayWidgetMode.Off,
+                _ => fallback
+            };
+        }
+
+        public static ModerationDisplayMode ParseModerationMode(string value)
+        {
+            return (value ?? "strikethrough").Trim().ToLowerInvariant() switch
+            {
+                "strikethrough" or "strike" or "dim" => ModerationDisplayMode.Strikethrough,
+                "deleted" or "replacedeleted" or "replace" => ModerationDisplayMode.ReplaceDeleted,
+                "hide" or "hidden" or "remove" => ModerationDisplayMode.Hide,
+                "off" or "none" or "false" or "ignore" => ModerationDisplayMode.Off,
+                _ => throw new NotSupportedException($"Invalid --moderation-mode '{value}'. Valid values are: strikethrough, deleted, hide, and off.")
+            };
+        }
+
+        public static ModerationDisplayMode ParseModerationSelection(int selectedIndex)
+        {
+            return selectedIndex switch
+            {
+                0 => ModerationDisplayMode.Strikethrough,
+                1 => ModerationDisplayMode.ReplaceDeleted,
+                2 => ModerationDisplayMode.Hide,
+                3 => ModerationDisplayMode.Off,
+                _ => ModerationDisplayMode.Strikethrough
+            };
+        }
+
+        public static string[] ParseCsvList(string csv)
+        {
+            return string.IsNullOrWhiteSpace(csv)
+                ? []
+                : csv.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        }
+
+        public bool EnsureEvenDimensions()
+        {
+            bool adjusted = false;
+            if (ChatHeight % 2 != 0)
+            {
+                ChatHeight++;
+                adjusted = true;
+            }
+            if (ChatWidth % 2 != 0)
+            {
+                ChatWidth++;
+                adjusted = true;
+            }
+            return adjusted;
+        }
     }
 }

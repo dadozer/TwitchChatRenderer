@@ -17,10 +17,12 @@ using TwitchDownloaderCore;
 using TwitchDownloaderCore.Chat;
 using TwitchDownloaderCore.Models;
 using TwitchDownloaderCore.Options;
+using TwitchDownloaderCore.Rendering.Encoding;
 using TwitchDownloaderCore.TwitchObjects;
 using TwitchDownloaderWPF.Extensions;
 using TwitchDownloaderWPF.Models;
 using TwitchDownloaderWPF.Properties;
+using TwitchDownloaderWPF.Services;
 using TwitchDownloaderWPF.Utils;
 using WpfAnimatedGif;
 using MessageBox = System.Windows.MessageBox;
@@ -45,51 +47,6 @@ namespace TwitchDownloaderWPF
         public PageChatRender()
         {
             InitializeComponent();
-        }
-
-        private static SKFontStyle ParseFontStyle(string style)
-        {
-            return style?.Trim().ToLowerInvariant() switch
-            {
-                "bold" => SKFontStyle.Bold,
-                "italic" or "italics" => SKFontStyle.Italic,
-                "bolditalic" or "bolditalics" => SKFontStyle.BoldItalic,
-                _ => SKFontStyle.Normal
-            };
-        }
-
-        private static string NormalizeFontStyleName(string style)
-        {
-            return style?.Trim().ToLowerInvariant() switch
-            {
-                "bold" => "Bold",
-                "italic" or "italics" => "Italic",
-                "bolditalic" or "bolditalics" => "BoldItalic",
-                _ => "Normal"
-            };
-        }
-
-        private static OverlayWidgetMode ParseOverlayWidgetSelection(int selectedIndex, OverlayWidgetMode fallback)
-        {
-            return selectedIndex switch
-            {
-                0 => OverlayWidgetMode.StickyTop,
-                1 => OverlayWidgetMode.ChatScroll,
-                2 => OverlayWidgetMode.Off,
-                _ => fallback
-            };
-        }
-
-        private static ModerationDisplayMode ParseModerationSelection(int selectedIndex)
-        {
-            return selectedIndex switch
-            {
-                0 => ModerationDisplayMode.Strikethrough,
-                1 => ModerationDisplayMode.ReplaceDeleted,
-                2 => ModerationDisplayMode.Hide,
-                3 => ModerationDisplayMode.Off,
-                _ => ModerationDisplayMode.Strikethrough
-            };
         }
 
         private void btnBrowse_Click(object sender, RoutedEventArgs e)
@@ -157,16 +114,17 @@ namespace TwitchDownloaderWPF
                 VerticalSpacingScale = double.Parse(textVerticalScale.Text, CultureInfo.CurrentCulture),
                 UsernameFontScale = double.Parse(textUsernameScale.Text, CultureInfo.CurrentCulture),
                 HighlightUserColor = highlightUsersColor,
-                HighlightUsersArray = textHighlightUsersList.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
-                IgnoreUsersArray = textIgnoreUsersList.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
-                BannedWordsArray = textBannedWordsList.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
+                HighlightUsersArray = ChatRenderOptions.ParseCsvList(textHighlightUsersList.Text),
+                IgnoreUsersArray = ChatRenderOptions.ParseCsvList(textIgnoreUsersList.Text),
+                BannedWordsArray = ChatRenderOptions.ParseCsvList(textBannedWordsList.Text),
                 Timestamp = checkTimestamp.IsChecked.GetValueOrDefault(),
                 MessageColor = messageColor,
                 Framerate = int.Parse(textFramerate.Text),
                 ParallelJobs = (int)numParallelJobs.Value,
-                InputArgs = CheckRenderSharpening.IsChecked == true ? textFfmpegInput.Text + " -filter_complex \"smartblur=lr=1:ls=-1.0\"" : textFfmpegInput.Text,
+                Sharpening = CheckRenderSharpening.IsChecked == true,
+                InputArgs = textFfmpegInput.Text,
                 OutputArgs = textFfmpegOutput.Text,
-                MessageFontStyle = ParseFontStyle(comboFontStyle.SelectedItem as string),
+                MessageFontStyle = ChatRenderOptions.ParseFontStyle(comboFontStyle.SelectedItem as string),
                 UsernameFontStyle = SKFontStyle.Bold,
                 GenerateMask = checkMask.IsChecked.GetValueOrDefault(),
                 OutlineSize = 4 * double.Parse(textOutlineScale.Text, CultureInfo.CurrentCulture),
@@ -182,11 +140,11 @@ namespace TwitchDownloaderWPF
                 AllowUnlistedEmotes = true,
                 DisperseCommentOffsets = checkDispersion.IsChecked.GetValueOrDefault(),
                 AdjustUsernameVisibility = checkAdjustUsernameVisibility.IsChecked.GetValueOrDefault(),
-                PredictionMode = ParseOverlayWidgetSelection(comboPredictionMode.SelectedIndex, OverlayWidgetMode.StickyTop),
-                PollMode = ParseOverlayWidgetSelection(comboPollMode.SelectedIndex, OverlayWidgetMode.StickyTop),
-                PinnedChatMode = ParseOverlayWidgetSelection(comboPinnedChatMode.SelectedIndex, OverlayWidgetMode.StickyTop),
-                HypeTrainMode = ParseOverlayWidgetSelection(comboHypeTrainMode.SelectedIndex, OverlayWidgetMode.ChatScroll),
-                ModerationMode = ParseModerationSelection(comboModerationMode.SelectedIndex),
+                PredictionMode = ChatRenderOptions.ParseOverlayWidgetSelection(comboPredictionMode.SelectedIndex, OverlayWidgetMode.StickyTop),
+                PollMode = ChatRenderOptions.ParseOverlayWidgetSelection(comboPollMode.SelectedIndex, OverlayWidgetMode.StickyTop),
+                PinnedChatMode = ChatRenderOptions.ParseOverlayWidgetSelection(comboPinnedChatMode.SelectedIndex, OverlayWidgetMode.StickyTop),
+                HypeTrainMode = ChatRenderOptions.ParseOverlayWidgetSelection(comboHypeTrainMode.SelectedIndex, OverlayWidgetMode.ChatScroll),
+                ModerationMode = ChatRenderOptions.ParseModerationSelection(comboModerationMode.SelectedIndex),
                 ShowModerationNotices = checkModerationNotices.IsChecked.GetValueOrDefault(true),
                 EnableClearAll = checkClearAll.IsChecked.GetValueOrDefault(false),
                 ShowRoomstateNotices = checkRoomstateNotices.IsChecked.GetValueOrDefault(true),
@@ -229,7 +187,7 @@ namespace TwitchDownloaderWPF
                 textHeight.Text = Settings.Default.Height.ToString();
                 textWidth.Text = Settings.Default.Width.ToString();
                 numFontSize.Value = Settings.Default.FontSize;
-                comboFontStyle.SelectedItem = NormalizeFontStyleName(Settings.Default.FontStyle);
+                comboFontStyle.SelectedItem = ChatRenderOptions.NormalizeFontStyleName(Settings.Default.FontStyle);
                 textUpdateTime.Text = Settings.Default.UpdateTime.ToString("0.0#");
                 colorFont.SelectedColor = System.Windows.Media.Color.FromRgb(Settings.Default.FontColorR, Settings.Default.FontColorG, Settings.Default.FontColorB);
                 textFramerate.Text = Settings.Default.Framerate.ToString();
@@ -360,7 +318,7 @@ namespace TwitchDownloaderWPF
         public void SaveSettings()
         {
             Settings.Default.Font = comboFont.SelectedItem.ToString();
-            Settings.Default.FontStyle = NormalizeFontStyleName(comboFontStyle.SelectedItem as string);
+            Settings.Default.FontStyle = ChatRenderOptions.NormalizeFontStyleName(comboFontStyle.SelectedItem as string);
             Settings.Default.Outline = checkOutline.IsChecked.GetValueOrDefault();
             Settings.Default.Timestamp = checkTimestamp.IsChecked.GetValueOrDefault();
             Settings.Default.BackgroundColorR = colorBackground.SelectedColor.GetValueOrDefault().R;
@@ -411,16 +369,13 @@ namespace TwitchDownloaderWPF
             {
                 Settings.Default.VideoCodec = ((Codec)comboCodec.SelectedItem).Name;
             }
-            Settings.Default.IgnoreUsersList = string.Join(",", textIgnoreUsersList.Text
-                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
-            Settings.Default.HighlightUsersList = string.Join(",", textHighlightUsersList.Text
-                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+            Settings.Default.IgnoreUsersList = string.Join(",", ChatRenderOptions.ParseCsvList(textIgnoreUsersList.Text));
+            Settings.Default.HighlightUsersList = string.Join(",", ChatRenderOptions.ParseCsvList(textHighlightUsersList.Text));
             Settings.Default.HighlightUsersColorR = colorHighlightUsers.SelectedColor.GetValueOrDefault().R;
             Settings.Default.HighlightUsersColorG = colorHighlightUsers.SelectedColor.GetValueOrDefault().G;
             Settings.Default.HighlightUsersColorB = colorHighlightUsers.SelectedColor.GetValueOrDefault().B;
             Settings.Default.HighlightUsersColorA = colorHighlightUsers.SelectedColor.GetValueOrDefault().A;
-            Settings.Default.BannedWordsList = string.Join(",", textBannedWordsList.Text
-                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+            Settings.Default.BannedWordsList = string.Join(",", ChatRenderOptions.ParseCsvList(textBannedWordsList.Text));
             if (RadioEmojiNotoColor.IsChecked == true)
                 Settings.Default.RenderEmojiVendor = (int)EmojiVendor.GoogleNotoColor;
             else if (RadioEmojiTwemoji.IsChecked == true)
@@ -518,8 +473,7 @@ namespace TwitchDownloaderWPF
 
             if (checkMask.IsChecked == false && (colorBackground.SelectedColor!.Value.A < 255 || ((bool)checkAlternateMessageBackgrounds.IsChecked! && colorAlternateBackground.SelectedColor!.Value.A < 255)))
             {
-                if (((VideoContainer)comboFormat.SelectedItem).Name is not "MOV" and not "WEBM" ||
-                    ((Codec)comboCodec.SelectedItem).Name is not "RLE" and not "ProRes" and not "VP8" and not "VP9")
+                if (comboCodec.SelectedItem is not Codec { SupportsTransparency: true })
                 {
                     AppendLog(Translations.Strings.ErrorLog + Translations.Strings.AlphaNotSupportedByCodec);
                     return false;
@@ -642,24 +596,24 @@ namespace TwitchDownloaderWPF
             comboModerationMode.Items.Add("Off");
             comboModerationMode.SelectedIndex = 0;
 
-            Codec h264Codec = new Codec() { Name = "H264", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v libx264 -preset:v veryfast -crf 18 -pix_fmt yuv420p \"{save_path}\"" };
-            Codec h264NvencCodec = new Codec() { Name = "H264 NVIDIA", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v h264_nvenc -preset:v p4 -cq 20 -pix_fmt yuv420p \"{save_path}\"" };
-            Codec h264AmfCodec = new Codec() { Name = "H264 AMD", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v h264_amf -preset:v p4 -cq 20 -pix_fmt yuv420p \"{save_path}\"" };
-            Codec h265Codec = new Codec() { Name = "H265", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v libx265 -preset:v veryfast -crf 18 -pix_fmt yuv420p \"{save_path}\"" };
-            Codec h265NvencCodec = new Codec() { Name = "H265 NVIDIA", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v hevc_nvenc -preset:v p4 -cq 21 -pix_fmt yuv420p \"{save_path}\"" };
-            Codec h265AmfCodec = new Codec() { Name = "H265 AMD", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v hevc_amf -preset:v p4 -cq 21 -pix_fmt yuv420p \"{save_path}\"" };
-            Codec vp8Codec = new Codec() { Name = "VP8", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v libvpx -crf 18 -b:v 2M -pix_fmt yuva420p -auto-alt-ref 0 \"{save_path}\"" };
-            Codec vp9Codec = new Codec() { Name = "VP9", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v libvpx-vp9 -crf 18 -b:v 2M -deadline realtime -cpu-used 8 -row-mt 1 -threads 0 -pix_fmt yuva420p \"{save_path}\"" };
-            Codec rleCodec = new Codec() { Name = "RLE", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v qtrle -pix_fmt argb \"{save_path}\"" };
-            Codec proresCodec = new Codec() { Name = "ProRes", InputArgs = "-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -", OutputArgs = "-c:v prores_ks -qscale:v 62 -pix_fmt argb \"{save_path}\"" };
-            VideoContainer mp4Container = new VideoContainer() { Name = "MP4", SupportedCodecs = [h264Codec, h265Codec, h264NvencCodec, h265NvencCodec, h264AmfCodec, h265AmfCodec] };
-            VideoContainer movContainer = new VideoContainer() { Name = "MOV", SupportedCodecs = [h264Codec, h265Codec, rleCodec, proresCodec, h264NvencCodec, h265NvencCodec, h264AmfCodec, h265AmfCodec] };
-            VideoContainer webmContainer = new VideoContainer() { Name = "WEBM", SupportedCodecs = [vp8Codec, vp9Codec] };
-            VideoContainer mkvContainer = new VideoContainer() { Name = "MKV", SupportedCodecs = [h264Codec, h265Codec, vp8Codec, vp9Codec, h264NvencCodec, h265NvencCodec, h264AmfCodec, h265AmfCodec] };
-            comboFormat.Items.Add(mp4Container);
-            comboFormat.Items.Add(movContainer);
-            comboFormat.Items.Add(webmContainer);
-            comboFormat.Items.Add(mkvContainer);
+            foreach (var containerPreset in FfmpegCodecPresets.Containers)
+            {
+                var supportedCodecs = containerPreset.Codecs
+                    .Select(static c => new Codec
+                    {
+                        Name = c.Name,
+                        InputArgs = c.InputArgs,
+                        OutputArgs = c.OutputArgs,
+                        SupportsTransparency = c.SupportsTransparency
+                    })
+                    .ToList();
+
+                comboFormat.Items.Add(new VideoContainer
+                {
+                    Name = containerPreset.Extension,
+                    SupportedCodecs = supportedCodecs
+                });
+            }
 
             comboBadges.Items.Add(new CheckComboBoxItem { Content = Translations.Strings.BadgeMaskBroadcaster, Tag = ChatBadgeType.Broadcaster });
             comboBadges.Items.Add(new CheckComboBoxItem { Content = Translations.Strings.BadgeMaskModerator, Tag = ChatBadgeType.Moderator });
@@ -724,73 +678,24 @@ namespace TwitchDownloaderWPF
 
         private void SaveArguments()
         {
-            List<CustomFfmpegArgs> args = JsonSerializer.Deserialize<List<CustomFfmpegArgs>>(Settings.Default.FfmpegArguments);
-
-            bool foundArg = false;
-            foreach (CustomFfmpegArgs arg in args)
+            if (comboFormat.SelectedItem is not VideoContainer selectedContainer || comboCodec.SelectedItem is not Codec selectedCodec)
             {
-                if (arg.CodecName == ((Codec)comboCodec.SelectedItem).Name && arg.ContainerName == ((VideoContainer)comboFormat.SelectedItem).Name)
-                {
-                    arg.InputArgs = textFfmpegInput.Text;
-                    arg.OutputArgs = textFfmpegOutput.Text;
-                    foundArg = true;
-                    break;
-                }
+                return;
             }
 
-            if (!foundArg)
-            {
-                CustomFfmpegArgs newArgs = new CustomFfmpegArgs() { CodecName = ((Codec)comboCodec.SelectedItem).Name, ContainerName = ((VideoContainer)comboFormat.SelectedItem).Name, InputArgs = textFfmpegInput.Text, OutputArgs = textFfmpegOutput.Text };
-                args.Add(newArgs);
-            }
-
-            Settings.Default.FfmpegArguments = JsonSerializer.Serialize(args);
-            Settings.Default.Save();
+            GuiPreferences.SaveCustomArgs(selectedContainer.Name, selectedCodec, textFfmpegInput.Text, textFfmpegOutput.Text);
         }
 
         private void LoadFfmpegArgs()
         {
-            List<CustomFfmpegArgs> args = JsonSerializer.Deserialize<List<CustomFfmpegArgs>>(Settings.Default.FfmpegArguments);
-            Codec selectedCodec = (Codec)comboCodec.SelectedItem;
-            VideoContainer selectedContainer = (VideoContainer)comboFormat.SelectedItem;
-
-            bool foundArg = false;
-            bool migrated = false;
-            foreach (CustomFfmpegArgs arg in args)
+            if (comboFormat.SelectedItem is not VideoContainer selectedContainer || comboCodec.SelectedItem is not Codec selectedCodec)
             {
-                if (arg.InputArgs != null && arg.InputArgs.Contains("-pix_fmt bgra", StringComparison.OrdinalIgnoreCase))
-                {
-                    arg.InputArgs = arg.InputArgs.Replace("-pix_fmt bgra", "-pix_fmt {pix_fmt}", StringComparison.OrdinalIgnoreCase);
-                    migrated = true;
-                }
-
-                if (arg.CodecName == "VP9" && (
-                    arg.OutputArgs == "-c:v libvpx-vp9 -crf 18 -b:v 2M -pix_fmt yuva420p \"{save_path}\"" ||
-                    arg.OutputArgs == "-c:v libvpx-vp9 -crf 18 -b:v 2M -deadline realtime -quality realtime -speed 4 -row-mt 1 -threads 4 -pix_fmt yuva420p \"{save_path}\""))
-                {
-                    arg.OutputArgs = "-c:v libvpx-vp9 -crf 18 -b:v 2M -deadline realtime -cpu-used 8 -row-mt 1 -threads 0 -pix_fmt yuva420p \"{save_path}\"";
-                    migrated = true;
-                }
-
-                if (arg.CodecName == selectedCodec.Name && arg.ContainerName == selectedContainer.Name)
-                {
-                    textFfmpegInput.Text = arg.InputArgs;
-                    textFfmpegOutput.Text = arg.OutputArgs;
-                    foundArg = true;
-                }
+                return;
             }
 
-            if (migrated)
-            {
-                Settings.Default.FfmpegArguments = JsonSerializer.Serialize(args);
-                Settings.Default.Save();
-            }
-
-            if (!foundArg)
-            {
-                textFfmpegInput.Text = selectedCodec.InputArgs;
-                textFfmpegOutput.Text = selectedCodec.OutputArgs;
-            }
+            var (inputArgs, outputArgs) = GuiPreferences.LoadCustomArgs(selectedContainer.Name, selectedCodec);
+            textFfmpegInput.Text = inputArgs;
+            textFfmpegOutput.Text = outputArgs;
         }
 
         private void textFfmpegInput_LostFocus(object sender, RoutedEventArgs e)
@@ -831,25 +736,30 @@ namespace TwitchDownloaderWPF
 
                 SaveSettings();
                 SetImage("Images/ppOverheat.gif", true);
-                ffmpegLog.Clear();
+                lock (ffmpegLog) ffmpegLog.Clear();
                 _cancellationTokenSource = new CancellationTokenSource();
                 UpdateActionButtons(true);
 
                 try
                 {
+                    var batchToken = _cancellationTokenSource.Token;
                     for (int i = 0; i < FileNames.Length; i++)
                     {
-                        _cancellationTokenSource.Token.ThrowIfCancellationRequested();
+                        batchToken.ThrowIfCancellationRequested();
                         string inputFile = FileNames[i];
                         string outputFile = Path.Combine(folderDialog.FolderName, Path.GetFileNameWithoutExtension(inputFile.Replace(".gz", "")) + "." + fileFormat.ToLower());
 
                         AppendLog($"[{i + 1}/{FileNames.Length}] Rendering {Path.GetFileName(inputFile)} -> {Path.GetFileName(outputFile)}");
                         ChatRenderOptions batchOptions = GetOptions(outputFile, inputFile);
-                        var batchProgress = new WpfTaskProgress((LogLevel)Settings.Default.LogLevels, SetPercent, msg => SetStatus($"[{i + 1}/{FileNames.Length}] {msg}"), AppendLog, s => { lock (ffmpegLog) ffmpegLog.Add(s); });
+                        int batchIndex = i + 1;
+                        var batchProgress = new WpfTaskProgress((LogLevel)Settings.Default.LogLevels, SetPercent, msg => SetStatus($"[{batchIndex}/{FileNames.Length}] {msg}"), AppendLog, s => { lock (ffmpegLog) ffmpegLog.Add(s); });
 
-                        using ChatRenderer batchRender = new ChatRenderer(batchOptions, batchProgress);
-                        await batchRender.ParseJsonAsync(_cancellationTokenSource.Token);
-                        await batchRender.RenderVideoAsync(_cancellationTokenSource.Token);
+                        await Task.Run(async () =>
+                        {
+                            using ChatRenderer batchRender = new ChatRenderer(batchOptions, batchProgress);
+                            await batchRender.ParseJsonAsync(batchToken);
+                            await batchRender.RenderVideoAsync(batchToken);
+                        }, batchToken);
                     }
 
                     SetStatus(Translations.Strings.StatusDone);
@@ -875,7 +785,6 @@ namespace TwitchDownloaderWPF
                     SetPercent(0);
                     _cancellationTokenSource.Dispose();
                     UpdateActionButtons(false);
-                    GC.Collect();
                 }
 
                 return;
@@ -896,10 +805,10 @@ namespace TwitchDownloaderWPF
             ChatRenderOptions options = GetOptions(saveFileDialog.FileName);
 
             var renderProgress = new WpfTaskProgress((LogLevel)Settings.Default.LogLevels, SetPercent, SetStatus, AppendLog, s => { lock (ffmpegLog) ffmpegLog.Add(s); });
-            ChatRenderer currentRender = new ChatRenderer(options, renderProgress);
+            using ChatRenderer currentRender = new ChatRenderer(options, renderProgress);
             try
             {
-                await currentRender.ParseJsonAsync(CancellationToken.None);
+                await Task.Run(() => currentRender.ParseJsonAsync(CancellationToken.None));
             }
             catch (Exception ex)
             {
@@ -980,7 +889,6 @@ namespace TwitchDownloaderWPF
                 UpdateActionButtons(false);
 
                 currentRender.Dispose();
-                GC.Collect();
             }
         }
 
@@ -1081,6 +989,7 @@ namespace TwitchDownloaderWPF
             textAccentStrokeScale.TextChanged += textHandler;
             textAccentIndentScale.TextChanged += textHandler;
             textSidePaddingScale.TextChanged += textHandler;
+            textHighlightUsersList.TextChanged += textHandler;
         }
 
         private void UpdateLivePreview()
@@ -1107,9 +1016,10 @@ namespace TwitchDownloaderWPF
                     AlternateMessageBackgrounds = checkAlternateMessageBackgrounds.IsChecked.GetValueOrDefault(),
                     MessageColor = new SKColor(fg.R, fg.G, fg.B),
                     HighlightUserColor = new SKColor(hl.R, hl.G, hl.B, hl.A),
+                    HighlightUsersArray = ChatRenderOptions.ParseCsvList(textHighlightUsersList.Text),
                     Font = (comboFont.SelectedItem as string) ?? "Inter Embedded",
                     FontSize = Math.Clamp(numFontSize.Value, 6, 48),
-                    MessageFontStyle = ParseFontStyle(comboFontStyle.SelectedItem as string),
+                    MessageFontStyle = ChatRenderOptions.ParseFontStyle(comboFontStyle.SelectedItem as string),
                     UsernameFontStyle = SKFontStyle.Bold,
                     Outline = checkOutline.IsChecked.GetValueOrDefault(),
                     OutlineSize = 4 * ParseScale(textOutlineScale.Text),
@@ -1171,18 +1081,11 @@ namespace TwitchDownloaderWPF
         public string Name;
         public string InputArgs;
         public string OutputArgs;
+        public bool SupportsTransparency;
 
         public override string ToString()
         {
             return Name;
         }
-    }
-
-    public class CustomFfmpegArgs
-    {
-        public string CodecName { get; set; }
-        public string ContainerName { get; set; }
-        public string InputArgs { get; set; }
-        public string OutputArgs { get; set; }
     }
 }

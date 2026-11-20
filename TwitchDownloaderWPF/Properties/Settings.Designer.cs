@@ -24,18 +24,6 @@ namespace TwitchDownloaderWPF.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("4")]
-        public int VodDownloadThreads {
-            get {
-                return ((int)(this["VodDownloadThreads"]));
-            }
-            set {
-                this["VodDownloadThreads"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("Inter Embedded")]
         public string Font {
             get {
@@ -336,30 +324,6 @@ namespace TwitchDownloaderWPF.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string OAuth {
-            get {
-                return ((string)(this["OAuth"]));
-            }
-            set {
-                this["OAuth"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
-        public bool EncodeCFR {
-            get {
-                return ((bool)(this["EncodeCFR"]));
-            }
-            set {
-                this["EncodeCFR"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool GenerateMask {
             get {
@@ -391,42 +355,6 @@ namespace TwitchDownloaderWPF.Properties {
             }
             set {
                 this["HideDonation"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("[{date_custom=\"M-d-yy\"}] {channel} - {title}")]
-        public string TemplateVod {
-            get {
-                return ((string)(this["TemplateVod"]));
-            }
-            set {
-                this["TemplateVod"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("[{date_custom=\"M-d-yy\"}] {channel} - {title}")]
-        public string TemplateClip {
-            get {
-                return ((string)(this["TemplateClip"]));
-            }
-            set {
-                this["TemplateClip"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("[{date_custom=\"M-d-yy\"}] {channel} - {title} - Chat")]
-        public string TemplateChat {
-            get {
-                return ((string)(this["TemplateChat"]));
-            }
-            set {
-                this["TemplateChat"] = value;
             }
         }
         
@@ -468,102 +396,6 @@ namespace TwitchDownloaderWPF.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("6")]
-        public int LimitVod {
-            get {
-                return ((int)(this["LimitVod"]));
-            }
-            set {
-                this["LimitVod"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("10")]
-        public int LimitClip {
-            get {
-                return ((int)(this["LimitClip"]));
-            }
-            set {
-                this["LimitClip"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("10")]
-        public int LimitChat {
-            get {
-                return ((int)(this["LimitChat"]));
-            }
-            set {
-                this["LimitChat"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("2")]
-        public int LimitRender {
-            get {
-                return ((int)(this["LimitRender"]));
-            }
-            set {
-                this["LimitRender"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string QueueFolder {
-            get {
-                return ((string)(this["QueueFolder"]));
-            }
-            set {
-                this["QueueFolder"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("4")]
-        public int ChatDownloadThreads {
-            get {
-                return ((int)(this["ChatDownloadThreads"]));
-            }
-            set {
-                this["ChatDownloadThreads"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("0")]
-        public int ChatDownloadType {
-            get {
-                return ((int)(this["ChatDownloadType"]));
-            }
-            set {
-                this["ChatDownloadType"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
-        public bool ChatEmbedEmotes {
-            get {
-                return ((bool)(this["ChatEmbedEmotes"]));
-            }
-            set {
-                this["ChatEmbedEmotes"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("[]")]
         public string FfmpegArguments {
             get {
@@ -583,18 +415,6 @@ namespace TwitchDownloaderWPF.Properties {
             }
             set {
                 this["EmoteScale"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("System")]
-        public string GuiTheme {
-            get {
-                return ((string)(this["GuiTheme"]));
-            }
-            set {
-                this["GuiTheme"] = value;
             }
         }
         
@@ -691,30 +511,6 @@ namespace TwitchDownloaderWPF.Properties {
             }
             set {
                 this["VerboseErrors"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
-        public bool ChatEmbedMissing {
-            get {
-                return ((bool)(this["ChatEmbedMissing"]));
-            }
-            set {
-                this["ChatEmbedMissing"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
-        public bool ChatReplaceEmbeds {
-            get {
-                return ((bool)(this["ChatReplaceEmbeds"]));
-            }
-            set {
-                this["ChatReplaceEmbeds"] = value;
             }
         }
         
@@ -864,30 +660,6 @@ namespace TwitchDownloaderWPF.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("en-US")]
-        public string GuiCulture {
-            get {
-                return ((string)(this["GuiCulture"]));
-            }
-            set {
-                this["GuiCulture"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("4096")]
-        public int MaximumBandwidthKib {
-            get {
-                return ((int)(this["MaximumBandwidthKib"]));
-            }
-            set {
-                this["MaximumBandwidthKib"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool ChatRenderSharpening {
             get {
@@ -895,18 +667,6 @@ namespace TwitchDownloaderWPF.Properties {
             }
             set {
                 this["ChatRenderSharpening"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
-        public bool UTCVideoTime {
-            get {
-                return ((bool)(this["UTCVideoTime"]));
-            }
-            set {
-                this["UTCVideoTime"] = value;
             }
         }
         
@@ -937,36 +697,12 @@ namespace TwitchDownloaderWPF.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
-        public bool DownloadThrottleEnabled {
-            get {
-                return ((bool)(this["DownloadThrottleEnabled"]));
-            }
-            set {
-                this["DownloadThrottleEnabled"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool AlternateMessageBackgrounds {
             get {
                 return ((bool)(this["AlternateMessageBackgrounds"]));
             }
             set {
                 this["AlternateMessageBackgrounds"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("True")]
-        public bool EncodeClipMetadata {
-            get {
-                return ((bool)(this["EncodeClipMetadata"]));
-            }
-            set {
-                this["EncodeClipMetadata"] = value;
             }
         }
         
@@ -996,66 +732,6 @@ namespace TwitchDownloaderWPF.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("1")]
-        public int VodTrimMode {
-            get {
-                return ((int)(this["VodTrimMode"]));
-            }
-            set {
-                this["VodTrimMode"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("0")]
-        public int ChatJsonCompression {
-            get {
-                return ((int)(this["ChatJsonCompression"]));
-            }
-            set {
-                this["ChatJsonCompression"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("0")]
-        public int ChatTextTimestampStyle {
-            get {
-                return ((int)(this["ChatTextTimestampStyle"]));
-            }
-            set {
-                this["ChatTextTimestampStyle"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string PreferredQuality {
-            get {
-                return ((string)(this["PreferredQuality"]));
-            }
-            set {
-                this["PreferredQuality"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("0")]
-        public int FileCollisionBehavior {
-            get {
-                return ((int)(this["FileCollisionBehavior"]));
-            }
-            set {
-                this["FileCollisionBehavior"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool ReduceMotion {
             get {
@@ -1063,17 +739,6 @@ namespace TwitchDownloaderWPF.Properties {
             }
             set {
                 this["ReduceMotion"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        public global::System.Collections.Specialized.StringCollection RecentChannels {
-            get {
-                return ((global::System.Collections.Specialized.StringCollection)(this["RecentChannels"]));
-            }
-            set {
-                this["RecentChannels"] = value;
             }
         }
         

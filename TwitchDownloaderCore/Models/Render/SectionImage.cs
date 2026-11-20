@@ -8,6 +8,8 @@ namespace TwitchDownloaderCore.Models.Render
         public readonly SKBitmap Bitmap;
         public readonly SKCanvas Canvas;
 
+        public bool IsAllocated => Bitmap is not null;
+
         public SectionImage(int width, int height)
         {
             Bitmap = new SKBitmap(width, height);
@@ -17,13 +19,13 @@ namespace TwitchDownloaderCore.Models.Render
 
         public void Flush()
         {
-            Canvas.Flush();
+            Canvas?.Flush();
         }
 
         public void Dispose()
         {
-            Canvas.Dispose();
-            Bitmap.Dispose();
+            Canvas?.Dispose();
+            Bitmap?.Dispose();
         }
     }
 }

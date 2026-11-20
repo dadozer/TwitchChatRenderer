@@ -12,5 +12,8 @@ namespace TwitchDownloaderCore.Models.Render
         public long Version { get; set; }
         public int StickyTopHeight { get; set; }
         public long StickySignature { get; set; }
+        public long IncrementalBaseVersion { get; set; } = -1;
+        public int ScrollDeltaY { get; set; }
+        public int DirtyTopY { get; set; }
     }
 }

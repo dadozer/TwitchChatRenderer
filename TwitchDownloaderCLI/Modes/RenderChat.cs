@@ -45,29 +45,6 @@ namespace TwitchDownloaderCLI.Modes
             }
         }
 
-        private static OverlayWidgetMode ParseOverlayWidgetMode(string value, string optionName)
-        {
-            return (value ?? "sticky").Trim().ToLowerInvariant() switch
-            {
-                "sticky" or "stickytop" or "top" => OverlayWidgetMode.StickyTop,
-                "scroll" or "chat" or "chatscroll" => OverlayWidgetMode.ChatScroll,
-                "off" or "none" or "false" or "disabled" => OverlayWidgetMode.Off,
-                _ => throw new NotSupportedException($"Invalid {optionName} '{value}'. Valid values are: sticky, scroll, and off.")
-            };
-        }
-
-        private static ModerationDisplayMode ParseModerationMode(string value)
-        {
-            return (value ?? "strikethrough").Trim().ToLowerInvariant() switch
-            {
-                "strikethrough" or "strike" or "dim" => ModerationDisplayMode.Strikethrough,
-                "deleted" or "replacedeleted" or "replace" => ModerationDisplayMode.ReplaceDeleted,
-                "hide" or "hidden" or "remove" => ModerationDisplayMode.Hide,
-                "off" or "none" or "false" or "ignore" => ModerationDisplayMode.Off,
-                _ => throw new NotSupportedException($"Invalid --moderation-mode '{value}'. Valid values are: strikethrough, deleted, hide, and off.")
-            };
-        }
-
         private static ChatRenderOptions GetRenderOptions(ChatRenderArgs inputOptions, FileCollisionHandler collisionHandler, ITaskLogger logger)
         {
             ChatRenderOptions renderOptions = new()
@@ -94,26 +71,13 @@ namespace TwitchDownloaderCLI.Modes
                 Font = inputOptions.Font,
                 FontSize = inputOptions.FontSize,
                 ChatBadgeMask = (ChatBadgeType)inputOptions.BadgeFilterMask,
-                MessageFontStyle = inputOptions.MessageFontStyle.ToLower() switch
-                {
-                    "normal" => SKFontStyle.Normal,
-                    "bold" => SKFontStyle.Bold,
-                    "italic" or "italics" => SKFontStyle.Italic,
-                    "bolditalic" or "bolditalics" => SKFontStyle.BoldItalic,
-                    _ => throw new NotSupportedException("Invalid message font style. Valid values are: normal, bold, italic, and bolditalic.")
-                },
-                UsernameFontStyle = inputOptions.UsernameFontStyle.ToLower() switch
-                {
-                    "normal" => SKFontStyle.Normal,
-                    "bold" => SKFontStyle.Bold,
-                    "italic" or "italics" => SKFontStyle.Italic,
-                    "bolditalic" or "bolditalics" => SKFontStyle.BoldItalic,
-                    _ => throw new NotSupportedException("Invalid username font style. Valid values are: normal, bold, italic, and bolditalic.")
-                },
+                MessageFontStyle = ChatRenderOptions.ParseFontStyle(inputOptions.MessageFontStyle, "message font style", throwOnInvalid: true),
+                UsernameFontStyle = ChatRenderOptions.ParseFontStyle(inputOptions.UsernameFontStyle, "username font style", throwOnInvalid: true),
                 UpdateRate = inputOptions.UpdateRate,
                 Framerate = inputOptions.Framerate,
                 GenerateMask = inputOptions.GenerateMask,
-                InputArgs = inputOptions.Sharpening ? inputOptions.InputArgs + " -filter_complex \"smartblur=lr=1:ls=-1.0\"" : inputOptions.InputArgs,
+                Sharpening = inputOptions.Sharpening,
+                InputArgs = inputOptions.InputArgs,
                 OutputArgs = inputOptions.OutputArgs,
                 FfmpegPath = string.IsNullOrWhiteSpace(inputOptions.FfmpegPath) ? FfmpegHandler.FfmpegExecutableName : Path.GetFullPath(inputOptions.FfmpegPath),
                 TempFolder = inputOptions.TempFolder,
@@ -122,13 +86,7 @@ namespace TwitchDownloaderCLI.Modes
                 RenderUserAvatars = inputOptions.RenderUserAvatars,
                 Timestamp = inputOptions.Timestamp,
                 Offline = inputOptions.Offline,
-                EmojiVendor = inputOptions.EmojiVendor.ToLower() switch
-                {
-                    "twitter" or "twemoji" => EmojiVendor.TwitterTwemoji,
-                    "google" or "notocolor" => EmojiVendor.GoogleNotoColor,
-                    "system" or "none" => EmojiVendor.None,
-                    _ => throw new NotSupportedException("Invalid emoji vendor. Valid values are: 'twitter' / 'twemoji', 'google' / 'notocolor', and 'system' / 'none'")
-                },
+                EmojiVendor = ChatRenderOptions.ParseEmojiVendor(inputOptions.EmojiVendor),
                 SkipDriveWaiting = inputOptions.SkipDriveWaiting,
                 EmoteScale = inputOptions.ScaleEmote,
                 BadgeScale = inputOptions.ScaleBadge,
@@ -146,11 +104,11 @@ namespace TwitchDownloaderCLI.Modes
                 AlternateMessageBackgrounds = inputOptions.AlternateMessageBackgrounds,
                 AdjustUsernameVisibility = (bool)inputOptions.AdjustUsernameVisibility!,
                 ParallelJobs = inputOptions.ParallelJobs,
-                PredictionMode = ParseOverlayWidgetMode(inputOptions.PredictionMode, "--prediction-mode"),
-                PollMode = ParseOverlayWidgetMode(inputOptions.PollMode, "--poll-mode"),
-                PinnedChatMode = ParseOverlayWidgetMode(inputOptions.PinnedChatMode, "--pinned-chat-mode"),
-                HypeTrainMode = ParseOverlayWidgetMode(inputOptions.HypeTrainMode, "--hype-train-mode"),
-                ModerationMode = ParseModerationMode(inputOptions.ModerationMode),
+                PredictionMode = ChatRenderOptions.ParseOverlayWidgetMode(inputOptions.PredictionMode, "--prediction-mode"),
+                PollMode = ChatRenderOptions.ParseOverlayWidgetMode(inputOptions.PollMode, "--poll-mode"),
+                PinnedChatMode = ChatRenderOptions.ParseOverlayWidgetMode(inputOptions.PinnedChatMode, "--pinned-chat-mode"),
+                HypeTrainMode = ChatRenderOptions.ParseOverlayWidgetMode(inputOptions.HypeTrainMode, "--hype-train-mode"),
+                ModerationMode = ChatRenderOptions.ParseModerationMode(inputOptions.ModerationMode),
                 ShowModerationNotices = (bool)inputOptions.ShowModerationNotices!,
                 EnableClearAll = inputOptions.EnableClearAll,
                 ShowRoomstateNotices = (bool)inputOptions.ShowRoomstateNotices!,
@@ -162,6 +120,9 @@ namespace TwitchDownloaderCLI.Modes
                 RenderHypeChat = (bool)inputOptions.RenderHypeChat!,
                 RenderPowerUps = (bool)inputOptions.RenderPowerUps!,
                 RenderSharedChatBadge = (bool)inputOptions.RenderSharedChatBadge!,
+                IgnoreUsersArray = ChatRenderOptions.ParseCsvList(inputOptions.IgnoreUsersString),
+                BannedWordsArray = ChatRenderOptions.ParseCsvList(inputOptions.BannedWordsString),
+                HighlightUsersArray = ChatRenderOptions.ParseCsvList(inputOptions.HighlightUsersString),
                 FileCollisionCallback = collisionHandler.HandleCollisionCallback,
             };
 
@@ -170,35 +131,9 @@ namespace TwitchDownloaderCLI.Modes
                 logger.LogWarning("Generate mask option has been selected with an opaque background. You most likely want to set a transparent background with --background-color \"#00000000\"");
             }
 
-            if (renderOptions.ChatHeight % 2 != 0 || renderOptions.ChatWidth % 2 != 0)
+            if (renderOptions.EnsureEvenDimensions())
             {
                 logger.LogWarning("Width and Height MUST be even, rounding up to the nearest even number to prevent errors");
-                if (renderOptions.ChatHeight % 2 != 0)
-                {
-                    renderOptions.ChatHeight++;
-                }
-                if (renderOptions.ChatWidth % 2 != 0)
-                {
-                    renderOptions.ChatWidth++;
-                }
-            }
-
-            if (inputOptions.IgnoreUsersString != "")
-            {
-                renderOptions.IgnoreUsersArray = inputOptions.IgnoreUsersString.Split(',',
-                    StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            }
-
-            if (inputOptions.BannedWordsString != "")
-            {
-                renderOptions.BannedWordsArray = inputOptions.BannedWordsString.Split(',',
-                    StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            }
-
-            if (inputOptions.HighlightUsersString != "")
-            {
-                renderOptions.HighlightUsersArray = inputOptions.HighlightUsersString.Split(',',
-                    StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             }
 
             return renderOptions;

@@ -26,6 +26,11 @@ jobs:
             Invoke-WebRequest -Uri "https://raw.githubusercontent.com/lay295/TwitchDownloader/master/TwitchDownloaderCore/Resources/noto-emoji-2.051.zip" -OutFile "TwitchDownloaderCore/Resources/noto-emoji-2.051.zip"
           }
 
+      - name: Run Unit Tests
+        run: |
+          dotnet run --project TwitchDownloaderCore.Tests/TwitchDownloaderCore.Tests.csproj -c Release
+          dotnet run --project TwitchDownloaderCLI.Tests/TwitchDownloaderCLI.Tests.csproj -c Release
+
       - name: Publish ChatRenderCLI.exe (win-x64)
         run: dotnet publish TwitchDownloaderCLI/TwitchDownloaderCLI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -p:DebugSymbols=false -o ./dist/win-x64
 

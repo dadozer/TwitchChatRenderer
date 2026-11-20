@@ -110,7 +110,7 @@ namespace TwitchDownloaderCore.Tools
 
             if (gif is null)
             {
-                logger.LogVerbose($"No Giphy result titled \"{title}\".");
+                logger?.LogVerbose($"No Giphy result titled \"{title}\".");
             }
 
             return gif;
@@ -127,17 +127,23 @@ namespace TwitchDownloaderCore.Tools
             using var response = await HttpClient.GetAsync($"https://giphy.com/search/{slug}", cancellationToken);
             if (response.StatusCode is HttpStatusCode.NotFound)
             {
-                logger.LogVerbose($"Giphy has no search page for \"{query}\".");
+                logger?.LogVerbose($"Giphy has no search page for \"{query}\".");
+                return null;
+            }
+
+            if (response.StatusCode is HttpStatusCode.TooManyRequests)
+            {
+                logger?.LogWarning($"Giphy rate-limited (HTTP 429) search for \"{query}\".");
                 return null;
             }
 
             response.EnsureSuccessStatusCode();
             var page = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            var results = ParseSearchPage(page);
+            var results = ParseSearchPage(page, logger);
             if (results.Count == 0)
             {
-                logger.LogVerbose($"Giphy search page for \"{query}\" yielded no results.");
+                logger?.LogVerbose($"Giphy search page for \"{query}\" yielded no results.");
                 return null;
             }
 
@@ -156,7 +162,7 @@ namespace TwitchDownloaderCore.Tools
         // a JSON array under "initialGifs", escaped inside a Next.js payload. Ceilings: only the first page is server
         // rendered, and a payload rework would stop this matching. Both degrade to plain text. Upgrade path is the API.
         /// <summary>Reads the search results embedded in a Giphy search page, or empty if it holds none.</summary>
-        internal static IReadOnlyList<GiphySearchEntry> ParseSearchPage(string page)
+        internal static IReadOnlyList<GiphySearchEntry> ParseSearchPage(string page, ITaskLogger logger = null)
         {
             var escaped = SliceResultsArray(page);
             if (escaped is null)
@@ -171,8 +177,9 @@ namespace TwitchDownloaderCore.Tools
                 var json = JsonSerializer.Deserialize<string>(string.Concat("\"", escaped, "\""));
                 results = JsonSerializer.Deserialize<GiphySearchResult[]>(json!) ?? [];
             }
-            catch (JsonException)
+            catch (JsonException ex)
             {
+                logger?.LogVerbose($"Failed to parse embedded Giphy search payload: {ex.Message}");
                 return [];
             }
 

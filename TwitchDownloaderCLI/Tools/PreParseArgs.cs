@@ -6,7 +6,7 @@ namespace TwitchDownloaderCLI.Tools
     {
         internal static string[] Parse(string[] args, string processFileName)
         {
-            if (args.Any(x => x is "-m" or "--mode" or "--embed-emotes" or "--silent" or "--verbose-ffmpeg" or "--chat-connections"))
+            if (args.Any(x => x is "-m" or "--mode" or "--silent" or "--verbose-ffmpeg"))
             {
                 // A legacy syntax was used, convert to new syntax
                 return Process(ConvertFromOldSyntax(args, processFileName));
@@ -47,13 +47,9 @@ namespace TwitchDownloaderCLI.Tools
             {
                 switch (processedArgs[i])
                 {
-                    case "--embed-emotes":
-                        Console.WriteLine("[WARNING] --embed-emotes has been deprecated in favor of -E / --embed-images and may be removed. Run '{0} help' for more information.", processFileName);
-                        ConvertEmbedEmoteSyntax(processedArgs, i);
-                        break;
                     case "-m" or "--mode":
                         Console.WriteLine("[WARNING] --mode <mode> has been deprecated in favor of verbs (like 'git <verb>') and may be removed. Run '{0} help' for more information.", processFileName);
-                        ConvertModeSyntax(processedArgs, i);
+                        ConvertModeSyntax(processedArgs, ref i);
                         break;
                     case "--silent":
                         Console.WriteLine("[WARNING] --silent has been deprecated in favor of log levels. '--log-level None' will be applied to the current session and may be removed. Run '{0} help' for more information.", processFileName);
@@ -63,29 +59,24 @@ namespace TwitchDownloaderCLI.Tools
                         Console.WriteLine("[WARNING] --verbose-ffmpeg has been deprecated in favor of log levels and may be removed. '--log-level Status,Info,Warning,Error,Ffmpeg' will be applied to the current session. Run '{0} help' for more information.", processFileName);
                         ConvertVerboseFfmpegSyntax(processedArgs, i);
                         break;
-                    case "--chat-connections":
-                        Console.WriteLine("[WARNING] --chat-connections has been deprecated in favor of -t / --threads and may be removed. Run '{0} help' for more information.", processFileName);
-                        ConvertChatConnectionsSyntax(processedArgs, i);
-                        break;
                 }
             }
 
             return processedArgs.ToArray();
         }
 
-        // Added at 2022-11-20T21:58:54Z (1668981534)
-        private static void ConvertEmbedEmoteSyntax(IList<string> args, int index)
-        {
-            args[index] = "-E";
-        }
-
         // Added at 2022-11-13T06:02:21Z (1668319341000)
-        private static void ConvertModeSyntax(IList<string> args, int index)
+        private static void ConvertModeSyntax(IList<string> args, ref int index)
         {
             // --mode
             args.RemoveAt(index);
+            if (index >= args.Count)
+            {
+                index--;
+                return;
+            }
 
-            // run-mode
+            // run-mode (e.g. ChatRender)
             var runMode = args[index];
             args.RemoveAt(index);
             args.Insert(0, runMode);
@@ -108,12 +99,6 @@ namespace TwitchDownloaderCLI.Tools
                 .Where(x => x is not nameof(LogLevel.None) and not nameof(LogLevel.Verbose));
 
             args.Insert(index + 1, string.Join(',', logLevels));
-        }
-
-        // Added at 2024-05-03T00:06:05Z (1714694765400)
-        private static void ConvertChatConnectionsSyntax(IList<string> args, int index)
-        {
-            args[index] = "--threads";
         }
     }
 }

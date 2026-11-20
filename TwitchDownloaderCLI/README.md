@@ -57,19 +57,20 @@ A high-performance, 100% drop-in compatible command-line tool engineered to rend
 
 In addition to 100% compatibility with upstream `TwitchDownloaderCLI chatrender`, `ChatRenderCLI` introduces major functional and performance upgrades:
 
-1. **Parallel Timeline Segment Partitioning (`-j` / `--jobs`)**:
-   - Automatically splits the render timeline into `N` concurrent time slices across isolated worker instances (`RenderWorkerState`), encoding each segment with its own FFmpeg process and stitching them losslessly via `ffmpeg -f concat -c copy`.
-   - Overcomes single-process encoder bottlenecks (especially `libvpx-vp9` alpha and `prores_ks`) for **2x–3.5x additional speedup** on multi-core CPUs.
-2. **Direct Planar YUV Pipeline (`yuv420p` & `yuva420p`)**:
-   - Converts frames directly in C# using precomputed BT.601 integer tables and 64-bit uniform row detection, cutting rawvideo pipe bandwidth by **37.5%–62.5%** and eliminating FFmpeg's single-threaded `bgra -> yuva420p` `swscale` conversion on every tick.
-3. **Pre-Converted Planar YUV Emote Cache (`EmoteYuvFrame`) & Dirty-Rect Blitting**:
-   - Animated emotes and Giphy GIF frames are pre-converted into planar YUV + Alpha once on first draw. On animation-only ticks, only the bounding rectangles of emotes that actually advanced a frame are blitted directly into the YUV frame buffer—skipping BGRA composition and full-frame color conversion entirely.
-4. **O(1) Next-Transition Short-Circuiting & Incremental Scroll Shifting**:
-   - Computes `_animNextChangeTickMs` across visible animated emotes to bypass unchanged high-FPS ticks in `< 0.001 ms`. When chat scrolls, existing pixels are shifted upward in memory and only newly exposed bottom rows are rasterized.
+1. **Cost-Weighted Parallel Segment Partitioning (`-j` / `--jobs`)**:
+   - Partitions the render timeline into `N` cost-balanced slices (`SegmentPartitioner.ComputeCostWeightedSegments`, concentrating workers on dense chat/emote bursts rather than naive equal-duration splits) across isolated `RenderWorkerState` instances, encoding each segment with its own FFmpeg process and stitching them losslessly via `ffmpeg -f concat -c copy`.
+   - Overcomes single-process encoder bottlenecks (especially narrow-panel `libvpx-vp9` alpha and `prores_ks`) for **2x–4x+ additional speedup** on multi-core CPUs.
+2. **Direct Planar YUV (`yuv420p` & `yuva420p`) & Timestamped NUT (`-f nut`) VFR Pipe**:
+   - Converts frames directly in C# using an `Avx2` `8x2` / `Vector128` `4x2` BT.601 kernel, zero-division reciprocal LUTs, and uniform-block skips, cutting pipe bandwidth by **37.5%–62.5%** and eliminating FFmpeg's single-threaded `bgra -> yuva420p` `swscale` conversion.
+   - Streams each unique frame **once** with exact PTS over a lightweight `-f nut` container (`NutPipeMuxer`) into FFmpeg's `-vf fps={fps}` filter, eliminating duplicate multi-megabyte pipe writes across stationary ticks.
+3. **Multi-Background Planar YUV Emote Cache (`EmoteSurfaceCache`) & Dirty-Rect Blitting**:
+   - Animated emotes and Giphy GIF frames are pre-composited into planar YUV + Alpha per active row background (standard, alternating row, highlighted user) with generation-safe invalidation on LRU eviction. On animation-only ticks, advancing emotes are blitted directly into the YUV planes or updated strictly inside coalesced 2D `DirtyRect` regions.
+4. **O(1) Next-Transition Short-Circuiting, Incremental Scroll & `SKTextBlob` Batching**:
+   - Tracks `AnimNextChangeTickMs` across visible animated emotes to coalesce unchanged high-FPS ticks in `< 0.001 ms`, shifts existing BGRA and YUV planes upward in-place (`ShiftYuvPlanesUp`) on scroll steps, batches same-line plain text into single `SKTextBlob` horizontal runs, and pre-renders upcoming sections on background lookahead threads.
 5. **Giphy GIF Chat Support (`--giphy`, `--gif-max-height-percent`)**:
    - Detects bracketed Giphy GIFs in chat comments (e.g., `[Horse Stare GIF by Jan Metternich]`), resolves them 8-at-a-time via Giphy search (cached in `giphy/resolved.json.gz`) or reads embedded GIF data from the JSON, and renders them full-width below the username.
-6. **Lazy Frame Decoding, LRU Memory Budget (`--image-cache-mb`), & >2 GB Streaming JSON**:
-   - Decodes emote/GIF frames lazily on first draw, evicts off-screen frames when exceeding `--image-cache-mb` (default `256` MB), and streams `.json` / `.json.gz` files larger than 2 GB without out-of-memory errors.
+6. **Immutable `CanonicalTimeline` IR, LRU Memory Budget (`--image-cache-mb`), & Single-Pass Streaming JSON**:
+   - Streams `.json` / `.json.gz` / UTF-8/16/32 BOM archives in a single pass via source-generated `ChatJsonContext` (with strict `--offline` purity and zero intermediate `JsonDocument` DOM), compiles an immutable `CanonicalTimeline` (`TimelineCompiler`) with zero render-time `Comment.Clone()` calls, decodes emojis from an in-memory `ZipArchive`, and evicts off-screen frames via `--image-cache-mb` (default `256` MB).
 7. **Smart `"Inter"` Font Resolution**:
    - Passing `--font Inter` automatically uses the built-in `Inter Embedded` typeface when `"Inter"` is not installed in the OS font catalog, avoiding unintended fallback to system defaults.
 
@@ -169,13 +170,13 @@ Arguments available across all modes.
 #### `-j` / `--jobs` *(NEW)*
 - **Type**: `int` (Default: `0`, auto-scale)
 - Number of parallel FFmpeg encoding segments to run concurrently.
-- **`0` (Auto)**: Automatically scales based on CPU core count, video duration, and codec (up to `4` parallel segments on 16+ thread CPUs for dual-plane `yuva420p` / `--generate-mask` renders, or up to `3` for standard renders). Videos under 60 seconds automatically use a single segment (`1`).
+- **`0` (Auto)**: Automatically scales based on CPU core count, chat panel width, codec class, and timeline duration (`ResolveAutoParallelJobs` — up to `8` workers on narrow `<512px` VP9 where tile parallelism is constrained, up to `6` on wide VP9 / ProRes / QTRLE, `1–3` on NVENC/AMF hardware session limits, and up to `4` on CPU x264/x265, with an 8-second minimum auto segment floor).
 - **`1`**: Forces single-stream sequential encoding (no temporary segment files).
-- **`2`–`16`**: Explicitly partitions the video timeline into `N` equal tick segments encoded in parallel across isolated `RenderWorkerState` workers and stitched losslessly via `ffmpeg -f concat -c copy` at completion.
+- **`2`–`16`**: Partitions the timeline into `N` cost-weighted segments (`ComputeCostWeightedSegments`, concentrating workers on dense chat/emote bursts and snapping boundaries to `--update-rate`) encoded concurrently and stitched losslessly via `ffmpeg -f concat -c copy`.
 
 #### `--sharpening`
 - **Type**: `bool` (Default: `false`)
-- Appends FFmpeg `smartblur` sharpening (`smartblur=lr=1:ls=-1.0`). Recommended primarily for high-resolution renders (`font-size` 24+).
+- Applies FFmpeg `smartblur` sharpening (`smartblur=lr=1:ls=-1.0`) to the primary video stream (automatically omitted on `--generate-mask` streams). Composed directly into `-vf` *before* `fps={fps}` by `FfmpegPipelineBuilder` so sharpening executes once per unique frame while preserving direct planar `yuv420p`/`yuva420p` and `-f nut` VFR piping. Recommended primarily for high-resolution renders (`--font-size` 24+).
 
 #### `--generate-mask`
 - **Type**: `bool` (Default: `false`)
@@ -454,14 +455,14 @@ All accented message types share a unified left accent bar thickness (`AccentStr
 - Arguments passed to FFmpeg before `-i -`.
 - Default: `-framerate {fps} -f rawvideo -analyzeduration {max_int} -probesize {max_int} -pix_fmt {pix_fmt} -video_size {width}x{height} -i -`
 - Supported template tokens: `{fps}`, `{max_int}`, `{pix_fmt}`, `{width}`, `{height}`.
-- ChatRenderCLI automatically manages `{pix_fmt}`: when writing planar YUV, it automatically selects `yuva420p` or `yuv420p` to eliminate FFmpeg color conversion overhead.
+- **Automatic Planar YUV & NUT VFR Negotiation**: When standard `-f rawvideo ... -i -` input args are used without custom user `-vf` / `-filter_complex` filters, `FfmpegPipelineBuilder` automatically negotiates `yuva420p` or `yuv420p` for `{pix_fmt}` and upgrades the pipe to timestamped `-f nut` (`NutPipeMuxer` + `-vf fps={fps}`) so stationary ticks require zero duplicate pipe writes. Passing custom video filters seamlessly falls back to standard CFR `rawvideo`.
 
 #### `--output-args`
 - **Type**: `string`
 - Arguments passed to FFmpeg after the input stream to configure video encoding.
 - Default: `-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p "{save_path}"`
-- Supported template tokens: `{save_path}`.
-- **Automatic VP9 Tuning**: When `libvpx-vp9` is used, ChatRenderCLI automatically detects it and injects hardware-optimized flags (`-row-mt 1`, `-cpu-used 8`, `-deadline good`, `-lag-in-frames 25`, `-auto-alt-ref 1`, and `-g <fps*8>`).
+- Supported template tokens: `{fps}`, `{width}`, `{height}`, `{max_int}`, `{save_path}`.
+- **Automatic VP9 Tuning**: Unless `-deadline best`/`good` is explicitly specified, `FfmpegPipelineBuilder` optimizes `libvpx-vp9` output flags with `-deadline realtime -cpu-used 8 -row-mt 1 -lag-in-frames 0 -frame-parallel 1 -static-thresh 1000 -aq-mode 3 -undershoot-pct 100`, per-worker `-threads`, width-aware `-tile-columns 0/1/2 -tile-rows 1` (`0` for `<512px`, `1` for `<1024px`, `2` for `1024px+`), and `-g <clamp(fps*8, 120, 600)>`.
 
 ---
 
@@ -518,11 +519,11 @@ ChatRenderCLI.exe -i chat.json -o chat.webm -w 420 -h 1080 --framerate 60 --back
 ```
 
 #### Why This Is Fast:
-- **Planar `yuva420p` Pipe**: ChatRenderCLI automatically detects `-pix_fmt yuva420p` and converts frames directly in C#, cutting pipe bandwidth from 4 bytes/pixel down to 2.5 bytes/pixel.
-- **Direct Planar YUV Emote Blitting**: Animated emotes are pre-converted into `EmoteYuvFrame` planes once and blitted directly into the YUV canvas on animation ticks without touching BGRA.
+- **Planar `yuva420p` + `-f nut` VFR Pipe**: ChatRenderCLI automatically detects `-pix_fmt yuva420p`, converts frames in C# via `Avx2` `8x2` SIMD, and streams each unique frame once with exact PTS over `-f nut`, cutting pipe bandwidth and eliminating redundant stationary-frame writes.
+- **Multi-Background Planar YUV Emote Blitting**: Animated emotes are pre-baked into `EmoteSurfaceCache` planes per row background and blitted directly into the YUV canvas on animation ticks without touching BGRA.
 - **Zero Redundant Swscale**: FFmpeg receives native `yuva420p` frames without executing CPU-heavy `swscale` filters on every tick.
-- **Dynamic GOP Scaling**: ChatRenderCLI sets `-g` to `framerate * 8` (e.g. `-g 480` at 60 FPS), maintaining fast timeline scrubbing in Wondershare Filmora 15 and DaVinci Resolve without bloating file sizes.
-- **Row-Based Multithreading & Parallel Segments (`-j`)**: Automatically adds `-row-mt 1` and `-cpu-used 8`, and partitions the timeline across parallel FFmpeg workers (`-j` / `--jobs`) to saturate all CPU cores even when `libvpx-vp9` hits its per-process tile/alpha threading ceiling.
+- **Dynamic GOP Scaling**: ChatRenderCLI sets `-g` to `clamp(framerate * 8, 120, 600)` (e.g. `-g 480` at 60 FPS), maintaining fast timeline scrubbing in Wondershare Filmora 15 and DaVinci Resolve without bloating file sizes.
+- **Width-Aware Tile Columns & Parallel Segments (`-j`)**: Automatically configures `-row-mt 1`, `-cpu-used 8`, and `-tile-columns 0` on narrow `<512px` chat panels while partitioning dense chat bursts across parallel FFmpeg workers (`-j` / `--jobs`) to saturate all CPU cores.
 
 ---
 
@@ -553,9 +554,9 @@ In your video editor, place `chat.mp4` on track 2, `chat_mask.mp4` on track 3, a
 ### 4. High Frame Rate (60 & 120 FPS) & Parallel Timeline Partitioning
 Doubling framerate from 30 FPS to 60 FPS doubles tick counts, but **does not** double chat updates. ChatRenderCLI uses several specialized optimizations:
 
-1. **O(1) Next-Transition Short-Circuiting**: ChatRenderCLI inspects active animated emotes and calculates `_animNextChangeTickMs`. If no emote changes frame on the current tick, the entire emote scan and composition is bypassed in `< 0.001 ms`.
-2. **Direct Planar YUV Emote Blitting**: On ticks where an animated emote advances, its pre-converted `EmoteYuvFrame` is alpha-blended directly over the Y, U, V, and A planes of the base scroll frame.
-3. **Parallel Timeline Partitioning (`-j` / `--jobs`)**: Multi-minute renders are split across concurrent worker threads and independent FFmpeg processes, then losslessly concatenated via `ffmpeg -f concat -c copy`.
+1. **O(1) Next-Transition Short-Circuiting & NUT VFR Coalescing**: ChatRenderCLI tracks `AnimNextChangeTickMs` across active animated emotes. When no emote changes frame on the current tick, composition is bypassed in `< 0.001 ms` and `NutPipeMuxer` advances the frame timestamp without re-sending pixel bytes over the pipe.
+2. **Multi-Background Planar YUV Emote Blitting**: On ticks where an animated emote advances, its pre-composited `EmoteSurfaceCache` planes for that row's background color are copied directly into the Y, U, V, and A planes of the frame buffer.
+3. **Cost-Weighted Parallel Timeline Partitioning (`-j` / `--jobs`)**: Multi-segment renders weight chat and active-emote density across concurrent workers and independent FFmpeg processes, then losslessly concatenate via `ffmpeg -f concat -c copy`.
 
 ---
 

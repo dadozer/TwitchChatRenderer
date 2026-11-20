@@ -60,8 +60,13 @@ namespace TwitchDownloaderCore.Tools
 
         public static HighlightType GetHighlightType(Comment comment)
         {
-            var body = comment.message.body;
-            var commenterId = comment.commenter._id;
+            var body = comment?.message?.body;
+            if (string.IsNullOrEmpty(body))
+            {
+                return HighlightType.None;
+            }
+
+            var commenterId = comment.commenter?._id;
 
             if (body.Contains(" subscribed at Tier", StringComparison.Ordinal))
             {
@@ -196,23 +201,38 @@ namespace TwitchDownloaderCore.Tools
 
             if (highlightType is HighlightType.GiftedMany)
             {
-                var (_, codec) = TwitchHelper.GetImage(new DirectoryInfo(_cacheDir), "https://static-cdn.jtvnw.net/subs-image-assets/gift-illus.png", "gift-illus", 2, "png", _renderOptions.Offline, null).GetAwaiter().GetResult();
-                using var _ = codec;
-                using var iconBitmap = SKBitmap.Decode(codec);
-                newHeight = TwitchHelper.SnapResizeHeight(newHeight, snapThreshold, snapThreshold, iconBitmap.Height);
-                var newWidth = (int)(newHeight / (double)iconBitmap.Height * iconBitmap.Width);
-                var scaledInfo = new SKImageInfo(newWidth, newHeight);
-                using var scaledBitmap = new SKBitmap(scaledInfo);
-                iconBitmap.ScalePixels(scaledBitmap, SKFilterQuality.High);
-                scaledBitmap.SetImmutable();
-                return SKImage.FromBitmap(scaledBitmap);
+                try
+                {
+                    var (imageBytes, codec) = TwitchHelper.GetImage(new DirectoryInfo(_cacheDir), "https://static-cdn.jtvnw.net/subs-image-assets/gift-illus.png", "gift-illus", 2, "png", _renderOptions.Offline, null).GetAwaiter().GetResult();
+                    using var _ = codec;
+                    using var iconBitmap = codec is not null
+                        ? SKBitmap.Decode(codec)
+                        : imageBytes is { Length: > 0 }
+                            ? SKBitmap.Decode(imageBytes)
+                            : null;
+
+                    if (iconBitmap is { Width: > 0, Height: > 0 })
+                    {
+                        var giftedHeight = TwitchHelper.SnapResizeHeight(newHeight, snapThreshold, snapThreshold, iconBitmap.Height);
+                        var newWidth = Math.Max(1, (int)(giftedHeight / (double)iconBitmap.Height * iconBitmap.Width));
+                        var scaledInfo = new SKImageInfo(newWidth, giftedHeight);
+                        using var scaledBitmap = new SKBitmap(scaledInfo);
+                        iconBitmap.ScalePixels(scaledBitmap, SKFilterQuality.High);
+                        scaledBitmap.SetImmutable();
+                        return SKImage.FromBitmap(scaledBitmap);
+                    }
+                }
+                catch
+                {
+                    // Fall back to embedded vector gift icon if offline or network/decode fails
+                }
             }
 
             var svgPathData = highlightType switch
             {
                 HighlightType.SubscribedTier => SUBSCRIBED_TIER_SVG,
                 HighlightType.SubscribedPrime => SUBSCRIBED_PRIME_SVG,
-                HighlightType.GiftedSingle or HighlightType.ContinuingGift or HighlightType.PayingForward => GIFTED_SINGLE_SVG,
+                HighlightType.GiftedSingle or HighlightType.GiftedMany or HighlightType.ContinuingGift or HighlightType.PayingForward => GIFTED_SINGLE_SVG,
                 HighlightType.GiftedAnonymous or HighlightType.ContinuingAnonymousGift => GIFTED_ANONYMOUS_SVG,
                 HighlightType.BitBadgeTierNotification => BIT_BADGE_TIER_SVG,
                 HighlightType.WatchStreak => WATCH_STREAK_SVG,

@@ -1,106 +1,93 @@
-# ChatRenderCLI & ChatRenderGUI — Hardware-Adaptive Performance Architecture
+# ChatRenderCLI & ChatRenderGUI — Clean-Slate Compiler & Compositor Architecture (Completed)
 
-This document is the architectural reference for the multi-phase optimization of `TwitchDownloaderCore`, `ChatRenderCLI`, and `ChatRenderGUI`. Every phase preserves **100% visual parity**, **100% TwitchDownloader CLI & JSON drop-in compatibility**, and **full Giphy + 7TV/BTTV/FFZ/Twitch emote support**, while achieving **10x–20x+ faster total render speeds** (and up to **30x+ faster** on 60/120 FPS transparent WebM VP9 overlays).
-
----
-
-## Core Architectural Decisions
-
-1. **100% Drop-In TwitchDownloader Compatibility**:
-   - Accept all upstream `TwitchDownloaderCLI chatrender` flags, legacy `-m ChatRender` arguments, and direct verb-less invocations (`ChatRenderCLI.exe -i ...`).
-   - Support all `.json` and `.json.gz` chat logs exported by any version of TwitchDownloader.
-2. **Parallel Timeline Segment Partitioning (`-j` / `--jobs`)**:
-   - Overcome single-process encoder bottlenecks (`libvpx-vp9` alpha and `prores_ks`) by partitioning the timeline across `N` concurrent worker instances (`RenderWorkerState`), encoding each slice via a dedicated FFmpeg process and stitching them losslessly with `ffmpeg -f concat -c copy`.
-3. **Hardware-Direct Planar YUV Pipeline & Direct YUV Emote Blitting**:
-   - Bypass FFmpeg's single-threaded `bgra -> yuva420p` `swscale` bottleneck by converting frames directly to planar `yuv420p` / `yuva420p` in C#, and pre-converting animated emote/GIF frames into cached planar `EmoteYuvFrame` buffers for direct YUV dirty-rect blitting.
-4. **Smart `"Inter"` Font Resolution**:
-   - When `--font Inter` is requested, inspect the OS font catalog via `SKFontManager`; if `"Inter"` is not installed on the system, automatically bind to the bundled `Inter Embedded` typeface instead of falling back to Arial or Segoe UI.
-5. **Streamlined Desktop GUI (`ChatRenderGUI.exe`)**:
-   - Provide a dedicated, single-window WPF desktop interface focused strictly on Chat Rendering, live SkiaSharp previewing, Parallel Segments (`0 = Auto`) configuration, and direct multi-file batch rendering.
+This document serves as the architectural reference for `TwitchDownloaderCore`, `ChatRenderCLI`, and `ChatRenderGUI`. Both the multi-wave throughput engineering (**Waves 1–3**) and the 5-phase clean-slate modular compiler/compositor refactoring (**Architecture Phases 1–5**) are **COMPLETED**, preserving **100% visual parity**, **100% TwitchDownloader CLI & JSON drop-in compatibility** (`v1.0`–`v1.4.0` + `v2.0-extended`, `.json`, `.json.gz`, UTF-8/16/32 BOM), and **full Giphy + 7TV/BTTV/FFZ/Twitch emote support**.
 
 ---
 
-## System Architecture Diagram
+## Core Architectural Pillars
+
+1. **Pure Streaming Ingestion & Non-Mutating `CanonicalTimeline` IR (`ChatJson` -> `TimelineCompiler`)**:
+   - `ChatJson.DeserializeAsync` streams `.json` and `.json.gz` files in a single pass via source-generated `ChatJsonContext` (`DeserializeFromStreamAsync`) with zero intermediate `JsonDocument` DOM and zero network calls (guaranteeing strict `--offline` purity).
+   - `TimelineCompiler.Compile` lowers `ChatRoot` + `ChatRenderOptions` into an immutable, `#nullable enable` `CanonicalTimeline` (`TimelineMessage`, `StickyOverlayEvent` records) without mutating `ChatRoot` or allocating per-frame `Comment.Clone()` copies.
+2. **Decoupled Asset Catalog & Multi-Background `EmoteSurfaceCache`**:
+   - `AssetCatalog` isolates all network/cache fetching, on-demand in-memory `ZipArchive` emoji indexing, gigantified `2.0x` emote variants, pooled `SectionImageCache`, and `ImageMemoryBudget` LRU tracking.
+   - `TwitchEmote` is pure domain media state with monotonic `DecodeGeneration` tracking; `EmoteSurfaceCache` caches pre-composited planar `YUV420P`/`YUVA420P` emote frames keyed by `(Emote, BgPixel, IncludeAlpha, IsBgra)`, eliminating cache thrashing across alternating and highlighted rows.
+3. **Structured `EncodingProfile` & `FfmpegPipelineBuilder`**:
+   - `FfmpegCodecPresets` provides a single canonical registry of container/codec presets shared by CLI and WPF (`GuiPreferences`), eliminating duplicate codec strings and fragile `Settings.Default` migration hacks.
+   - `FfmpegPipelineBuilder.BuildEncodingPlan` composes `--sharpening` (`smartblur=lr=1:ls=-1.0`) directly into the output `-vf` chain *before* `fps={fps}`, preserving direct planar `yuv420p`/`yuva420p` and zero-duplicate `-f nut` piping.
+4. **Stateless Layout/Section Renderers & Unified `1..N` `SegmentCompositor`**:
+   - `TextLayoutEngine`, `MessageSectionRenderer`, and `StickyOverlayRenderer` (`StickyOverlayTracker`) render immutable `TimelineMessage` and `StickyOverlayEvent` records using thread-local `SectionRenderContext` buffers, same-line `SKTextBlob` horizontal runs, strike-cached `A8` outlines, and zero render-time `JsonElement` parsing.
+   - `ChatPreviewRenderer` drives the WPF live preview directly through `TextLayoutEngine` + `MessageSectionRenderer` over synthetic in-memory assets so preview styling never drifts from encoded video.
+   - `ChatRenderer` (~390 LOC) executes a single unified `1..N` segment path (`SegmentPartitioner` -> `SegmentCompositor` -> `FfmpegEncodeCoordinator`), eliminating duplicate single-worker vs multi-worker loops and forced `GC.Collect()` pauses.
+
+---
+
+## Modular Pipeline Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                     PHASE 1: STARTUP & ASSET PIPELINE                        │
-│  ┌─────────────────────────┐   ┌─────────────────────────┐   ┌────────────┐  │
-│  │ Single-Pass Comment     │   │ Parallel Disk/HTTP      │   │ On-Demand  │  │
-│  │ Token & Emoji Indexer   │──▶│ Emote/Badge/GIF Loader  │──▶│ Emoji      │  │
-│  │ (O(N) Span Tokenization)│   │ (Scaled by Core Count)  │   │ Decoder    │  │
-│  └─────────────────────────┘   └─────────────────────────┘   └────────────┘  │
-└───────────────────────────────────────┬──────────────────────────────────────┘
-                                        │
-                                        ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                PHASE 3: LOOKAHEAD PRE-RENDER & DECODE WORKERS                │
-│  ┌───────────────────────────────────┐  ┌─────────────────────────────────┐  │
-│  │ Background CommentSection Workers │  │ Background Emote/GIF Frame      │  │
-│  │ • Parallel Text Layout & Outlines │  │ Extraction & Planar YUV Cache   │  │
-│  │ • Direct Single-Line Rasterization│  │ • EmoteYuvFrame Pre-Conversion  │  │
-│  └─────────────────┬─────────────────┘  └────────────────┬────────────────┘  │
-└────────────────────┼─────────────────────────────────────┼───────────────────┘
-                     └──────────────────┬──────────────────┘
-                                        ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│      PHASE 2 & 5: PARALLEL SEGMENT WORKERS & INCREMENTAL YUV COMPOSITOR      │
-│  ┌───────────────────────────────────┐  ┌─────────────────────────────────┐  │
-│  │ Isolated RenderWorkerState [1..N] │  │ Direct YUV Dirty-Rect Blitter   │  │
-│  │ • Incremental Scroll Shifting     │─▶│ • Blits EmoteYuvFrame in YUV420 │  │
-│  │ • O(1) Next-Transition Skip       │  │ • Skips BGRA on Anim-Only Ticks │  │
-│  └───────────────────────────────────┘  └────────────────┬────────────────┘  │
-└──────────────────────────────────────────────────────────┼───────────────────┘
-                                                           │
-                                                           ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│            PHASE 4 & 5: ASYNC FFMPEG PIPES & LOSSLESS CONCAT MUXER           │
-│  ┌───────────────────────────────────┐  ┌─────────────────────────────────┐  │
-│  │ Pooled Planar YUV Ring Buffers    │  │ Multi-Process FFmpeg Workers    │  │
-│  │ • 64-Bit Uniform Row Fast-Path    │─▶│ • VP9 -row-mt 1 / -cpu-used 8   │  │
-│  │ • AVX-512 / AVX2 Alpha Masking    │  │ • Lossless -f concat -c copy    │  │
-│  └───────────────────────────────────┘  └─────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                     PHASE 1: PURE INGESTION & TIMELINE IR                        │
+│  ┌─────────────────────────┐    ┌──────────────────────────┐    ┌─────────────┐  │
+│  │ ChatJson.cs             │    │ TimelineCompiler.cs      │    │ Canonical   │  │
+│  │ • Single-Pass Streamer  │───▶│ • Non-Mutating Lowering  │───▶│ Timeline IR │  │
+│  │ • Strict Offline Purity │    │ • Mod/Notice/Event Split │    │ (Immutable) │  │
+│  └─────────────────────────┘    └──────────────────────────┘    └──────┬──────┘  │
+└────────────────────────────────────────────────────────────────────────┼─────────┘
+                                                                         │
+                                                                         ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│               PHASE 2–3: ASSET CATALOG, LAYOUT & ENCODING PLANNER                │
+│  ┌─────────────────────────┐    ┌──────────────────────────┐    ┌─────────────┐  │
+│  │ AssetCatalog.cs         │    │ TextLayoutEngine.cs      │    │ FfmpegPipe  │  │
+│  │ • In-Memory Emoji Zip   │    │ • ThreadLocal Contexts   │    │ Builder.cs  │  │
+│  │ • Multi-BG EmoteYuvCache│    │ • SKTextBlob + Username  │    │ • NUT + YUV │  │
+│  └────────────┬────────────┘    └────────────┬─────────────┘    └──────┬──────┘  │
+└───────────────┼──────────────────────────────┼─────────────────────────┼─────────┘
+                └──────────────────────────────┼─────────────────────────┘
+                                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│           PHASE 4–5: UNIFIED 1..N SEGMENT COMPOSITOR & ENCODE COORDINATOR        │
+│  ┌──────────────────────────────┐  ┌──────────────────────────────────────────┐  │
+│  │ MessageSectionRenderer.cs    │  │ SegmentCompositor.cs + SimdPixelConverter│  │
+│  │ StickyOverlayRenderer.cs     │─▶│ • Async Sliding-Window Lookahead         │  │
+│  │ ChatPreviewRenderer.cs (GUI) │  │ • Incremental Scroll + AVX2 8x2 BT.601   │  │
+│  └──────────────────────────────┘  └────────────────────┬─────────────────────┘  │
+│                                                         ▼                        │
+│                                    ┌──────────────────────────────────────────┐  │
+│                                    │ FfmpegEncodeCoordinator.cs               │  │
+│                                    │ • Async Bounded Channel + NutPipeMuxer   │  │
+│                                    │ • Lossless Multi-Segment -f concat Mux   │  │
+│                                    └──────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Completed Optimization Phases
+## Module Responsibility Matrix
 
-### Phase 1 — Startup, Font Resolution & Asset Loading Optimization
-- **Smart `"Inter"` Font Resolution**:
-  - Detects whether `"Inter"` is installed in the OS font catalog when `--font Inter` is requested; if missing, automatically binds to the embedded `Inter` typeface resources (`Inter`, `InterBold`, `InterItalic`, `InterBoldItalic`).
-- **Single-Pass $\mathcal{O}(\text{Comments})$ Word & Cheer Token Indexing**:
-  - Replaces $\mathcal{O}(\text{Emotes} \times \text{Comments})$ per-emote regex scans in `TwitchHelper.GetThirdPartyEmotes` and `TwitchHelper.GetBits` with a single zero-allocation `ReadOnlySpan<char>` tokenization pass over comment bodies into a `HashSet<string>` (`AlternateLookup<ReadOnlySpan<char>>`).
-- **On-Demand Emoji Indexing & Lazy Decoding/Scaling**:
-  - Indexes all ~3,689 Twemoji/NotoColor Unicode sequences from filenames in under 1 ms without decoding all 3,689 PNGs up front. Decodes and cubic-scales (`SKFilterQuality.High`) only the emojis that actually appear in the chat log on demand.
-- **Hardware-Adaptive Concurrent Asset & Metadata Fetching**:
-  - Fetches BTTV, FFZ, and 7TV metadata concurrently (`Task.WhenAll`), filters badge versions to those actually present in comments, and parallelizes disk cache reads, `SKCodec` header parsing, and HTTP downloads across `GetEmotes`, `GetThirdPartyEmotes`, `GetChatBadges`, `GetGiphyGifs`, `GetBits`, and `GetAvatars`.
+| Module | Location | Responsibility |
+| :--- | :--- | :--- |
+| **`ChatJson`** | `Chat/ChatJson.cs` | Single-pass streaming `.json` / `.json.gz` / UTF-8/16/32 BOM deserialization via `ChatJsonContext` with zero network I/O and guarded `DateTime` math. |
+| **`CanonicalTimeline`** | `Chat/Timeline/CanonicalTimeline.cs` | `#nullable enable` immutable records for `TimelineMessage`, `TimelineNoticeInfo`, and typed `StickyOverlayEvent`s (`Prediction`, `Poll`, `PinnedChat`, `HypeTrain`). |
+| **`TimelineCompiler`** | `Chat/Timeline/TimelineCompiler.cs` | Pure compiler handling filtering, moderation pairing (`clearmsg`/`clearchat`), `roomstate` transitions, sub/streak splitting, dispersion, and single-pass flooring. |
+| **`AssetCatalog`** | `Rendering/AssetCatalog.cs` | Badges, 1P/3P emotes, Giphy GIFs, cheermotes, avatars, gigantified emotes, in-memory `ZipArchive` emojis, `SectionImageCache`, `ImageMemoryBudget`, and `EmoteSurfaceCache`. |
+| **`EmoteSurfaceCache`** | `Rendering/EmoteSurfaceCache.cs` | Thread-safe multi-background planar `YUV420P`/`YUVA420P` emote cache keyed by `(Emote, BgPixel, IncludeAlpha, IsBgra)` with `DecodeGeneration` invalidation. |
+| **`SimdPixelConverter`** | `Rendering/SimdPixelConverter.cs` | `DirtyRect` coalescing, `AVX-512`/`AVX2`/`AdvSimd` alpha masking, `Avx2` `8x2` / `Vector128` `4x2` BT.601 conversion, zero-div reciprocal LUTs, and `ShiftYuvPlanesUp`. |
+| **`EncodingProfile` & `FfmpegPipelineBuilder`** | `Rendering/Encoding/*` | Canonical `FfmpegCodecPresets`, width-aware VP9 tile tuning, NUT pipe negotiation, and `-vf smartblur` sharpening composition without breaking planar YUV/NUT. |
+| **`TextLayoutEngine`** | `Rendering/TextLayoutEngine.cs` | Smart `"Inter"` resolution, `SectionRenderContext` per-thread state, `SKTextBlob` horizontal run batching, strike-cached outlines, and WCAG username caching. |
+| **`MessageSectionRenderer`** | `Rendering/MessageSectionRenderer.cs` | Stateless rasterizer for regular chat rows, compact 1-line sub/gift/streak headers, threaded replies, Hype Chat pills, announcements, and moderation states. |
+| **`StickyOverlayRenderer`** | `Rendering/StickyOverlayRenderer.cs` | Deterministic `StickyOverlayTracker` state machine and Twitch-authentic top widget renderer (Predictions, Polls, Pinned Chat, Hype Trains). |
+| **`SegmentPartitioner` & `SegmentCompositor`** | `Rendering/Segment*.cs` | Cost-weighted timeline partitioning (`1..N` segments), background lookahead producer loop, O(1) `AnimNextChangeTickMs` skip, incremental scroll, and multi-BG YUV blitting. |
+| **`FfmpegEncodeCoordinator`** | `Rendering/FfmpegEncodeCoordinator.cs` | Process lifecycle registry, bounded async pipe writer (`NutPipeMuxer` / `rawvideo`), lossless `-f concat -c copy` stitching, and deterministic temp cleanup. |
+| **`ChatPreviewRenderer` & `GuiPreferences`** | `Rendering/ChatPreviewRenderer.cs`, `WPF/Services/GuiPreferences.cs` | Live WPF preview driven by `MessageSectionRenderer` over synthetic in-memory assets, plus clean JSON-persisted FFmpeg preset overrides. |
 
-### Phase 2 — Memory Bandwidth, Incremental Scrolling & Dirty-Rect Compositing
-- **Single-Line `SectionImage` Fast-Path**:
-  - Avoids redundant intermediate bitmap blits in `CombineImages` for single-line comments.
-- **Incremental `UpdateFrame` Canvas Scrolling**:
-  - Shifts still-visible upper chat regions upward in-place when new comments arrive and draws only newly revealed comments at the bottom.
-- **O(1) Next-Transition Short-Circuiting (`_animNextChangeTickMs`)**:
-  - Tracks the exact timestamp of the next animated emote frame transition on screen, bypassing unchanged high-FPS ticks in `< 0.001 ms` and incrementing zero-allocation frame repeat counters.
+---
 
-### Phase 3 — Hardware-Adaptive Multi-Threaded Lookahead Pipeline
-- **Background `CommentSection` Pre-Renderer**:
-  - Pre-renders upcoming `CommentSection` layouts, text outlines (`GetTextPath` + `DrawPath`), and static elements across a bounded sliding window of worker threads.
-- **Background Emote & Giphy Frame Pre-Decoder**:
-  - Decodes and scales multi-frame animated emotes and Giphy GIFs asynchronously ahead of the render tick cursor.
+## Verification Suite Summary
 
-### Phase 4 — Direct Planar YUV, Async FFmpeg Pipe Writer, AVX-512 Masking & VP9 Alpha Tuning
-- **Direct Planar YUV Conversion (`ConvertFrameToYuv420p`)**:
-  - Converts BGRA frames to planar `yuv420p` or `yuva420p` in C# using precomputed BT.601 LUTs and 64-bit uniform row fast-paths, cutting pipe bandwidth by 37.5%–62.5% and bypassing FFmpeg `swscale`.
-- **Pre-Converted Planar YUV Emote Cache (`EmoteYuvFrame`) & Direct YUV Blitting**:
-  - Converts each decoded emote/GIF frame once into planar Y, U, V, and Alpha planes (`EmoteYuvFrame`). On animation-only ticks, blits advancing emote rectangles directly onto the planar YUV buffer without touching BGRA.
-- **Asynchronous Ring-Buffered FFmpeg Pipe Writer & Native AVX-512 Alpha Extraction**:
-  - Decouples `ffmpegStream.Write` from the render thread using a bounded pool of frame buffers and vectorizes `SetFrameMask` with `Avx512BW`, `Avx2`, `Ssse3`, and `AdvSimd`.
-
-### Phase 5 — Parallel Timeline Segment Partitioning & Streamlined `ChatRenderGUI`
-- **Parallel Timeline Segment Partitioning (`-j` / `--jobs`)**:
-  - Encapsulates all mutable per-segment state into `RenderWorkerState`, allowing `RunParallelSegmentsAsync` to partition the timeline into `N` concurrent segments with brief warmup pre-rolls (`600` ticks) for identical scroll state, followed by lossless `ffmpeg -f concat -c copy` stitching.
-- **Streamlined `ChatRenderGUI.exe` (`TwitchDownloaderWPF`)**:
-  - Restores the WPF Chat Render interface with live SkiaSharp previewing, a dedicated **Parallel Segments (`0 = Auto`)** control, optimized VP9 presets, and direct multi-file batch rendering.
+| Suite | Coverage Focus | File |
+| :--- | :--- | :--- |
+| **Wave 1 Suite** | Pooled `SectionImageCache`, transitive `DirtyRect` coalescing, sub-rect & scroll-shifted planar YUV bit-exactness, `EmoteSurfaceCache` blitting | `Wave1RenderOptimizationTests.cs` |
+| **Wave 2 Suite** | Exhaustive $1.105 \times 10^6$ reciprocal LUT verification, `Avx2`/`Vector128` vs scalar YUV parity, `NutPipeMuxer` framing, cost-weighted segments, VP9 width tuning | `Wave2RenderOptimizationTests.cs` |
+| **Wave 3 Suite** | Streaming `.json`/`.json.gz`/BOM/legacy `v1.0`–`v1.4` deserialization, zero-disk in-memory emoji archives, RTL detection, repeat-chatter username caching | `Wave3RenderOptimizationTests.cs` |
+| **Architecture Suite** | Non-mutating `TimelineCompiler` IR, `--sharpening` NUT/YUV pipeline preservation, multi-background `EmoteSurfaceCache` + generation invalidation, `StickyOverlayTracker`, live `ChatPreviewRenderer` | `PipelineArchitectureTests.cs` |

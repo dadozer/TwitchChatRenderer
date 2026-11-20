@@ -1,4 +1,4 @@
-﻿namespace TwitchDownloaderCore.TwitchObjects.Gql
+namespace TwitchDownloaderCore.TwitchObjects.Gql
 {
     public class UserInfoData
     {
@@ -9,6 +9,12 @@
     {
         public UserInfoData data { get; set; }
         public Extensions extensions { get; set; }
+    }
+
+    public class Extensions
+    {
+        public int durationMilliseconds { get; set; }
+        public string requestID { get; set; }
     }
 
     public class User

@@ -9,6 +9,10 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TwitchDownloaderCLI", "Twit
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TwitchDownloaderWPF", "TwitchDownloaderWPF\TwitchDownloaderWPF.csproj", "{B45736F9-3E9D-48C2-A713-19283A458792}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TwitchDownloaderCore.Tests", "TwitchDownloaderCore.Tests\TwitchDownloaderCore.Tests.csproj", "{69354558-C2FA-4919-8D6E-477333A293EE}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TwitchDownloaderCLI.Tests", "TwitchDownloaderCLI.Tests\TwitchDownloaderCLI.Tests.csproj", "{98D68DC7-3DBB-43F4-A876-F5E8875D94A2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +31,14 @@ Global
 		{B45736F9-3E9D-48C2-A713-19283A458792}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B45736F9-3E9D-48C2-A713-19283A458792}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B45736F9-3E9D-48C2-A713-19283A458792}.Release|Any CPU.Build.0 = Release|Any CPU
+		{69354558-C2FA-4919-8D6E-477333A293EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{69354558-C2FA-4919-8D6E-477333A293EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{69354558-C2FA-4919-8D6E-477333A293EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{69354558-C2FA-4919-8D6E-477333A293EE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{98D68DC7-3DBB-43F4-A876-F5E8875D94A2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{98D68DC7-3DBB-43F4-A876-F5E8875D94A2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{98D68DC7-3DBB-43F4-A876-F5E8875D94A2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{98D68DC7-3DBB-43F4-A876-F5E8875D94A2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

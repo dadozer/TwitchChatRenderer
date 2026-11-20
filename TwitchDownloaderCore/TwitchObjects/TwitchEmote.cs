@@ -24,8 +24,11 @@ namespace TwitchDownloaderCore.TwitchObjects
         public EmoteProvider EmoteProvider { get; set; }
 
         private SKImage[] _emoteFrames;
+        private int _decodeGeneration;
         private SKImageInfo _info;
         private int[] _cumulativeDurationMs = [];
+
+        public int DecodeGeneration => Volatile.Read(ref _decodeGeneration);
 
         public SKImage[] EmoteFrames
         {
@@ -262,36 +265,56 @@ namespace TwitchDownloaderCore.TwitchObjects
                 return frames;
             }
 
-            // When scaling a large multi-frame GIF/WebP (>= 8 frames), decode sequentially using PriorFrame chaining
-            // and then scale all frames in parallel across CPU cores.
+            // When scaling a large multi-frame GIF/WebP (>= 8 frames), process frames in bounded chunks of 16:
+            // decode sequentially within each chunk using PriorFrame chaining, then scale the chunk in parallel across CPU cores
+            // while reusing the 16 scratch SKBitmaps across chunks so 150-frame Giphy GIFs never spike native memory.
             if (FrameCount >= 8)
             {
-                var nativeFrames = new SKBitmap[FrameCount];
-                using (var decodeScratch = new SKBitmap(nativeInfo))
-                {
-                    var byteCount = (long)nativeInfo.BytesSize;
-                    for (int i = 0; i < FrameCount; i++)
-                    {
-                        DecodeFrameWithPrior(i, ref priorFrame, frameInfos, nativeInfo, decodeScratch);
+                const int ChunkSize = 16;
+                int poolLen = Math.Min(FrameCount, ChunkSize);
+                var chunkBitmaps = new SKBitmap[poolLen];
+                var maxParallel = Math.Clamp(Environment.ProcessorCount, 2, 16);
+                var parallelOpts = new ParallelOptions { MaxDegreeOfParallelism = maxParallel };
 
-                        var copy = new SKBitmap(nativeInfo);
-                        unsafe
+                try
+                {
+                    for (int p = 0; p < poolLen; p++)
+                    {
+                        chunkBitmaps[p] = new SKBitmap(nativeInfo);
+                    }
+
+                    using var decodeScratch = new SKBitmap(nativeInfo);
+                    var byteCount = (long)nativeInfo.BytesSize;
+
+                    for (int chunkStart = 0; chunkStart < FrameCount; chunkStart += ChunkSize)
+                    {
+                        int chunkLen = Math.Min(ChunkSize, FrameCount - chunkStart);
+                        for (int offset = 0; offset < chunkLen; offset++)
                         {
-                            Buffer.MemoryCopy((void*)decodeScratch.GetPixels(), (void*)copy.GetPixels(), byteCount, byteCount);
+                            DecodeFrameWithPrior(chunkStart + offset, ref priorFrame, frameInfos, nativeInfo, decodeScratch);
+                            unsafe
+                            {
+                                Buffer.MemoryCopy((void*)decodeScratch.GetPixels(), (void*)chunkBitmaps[offset].GetPixels(), byteCount, byteCount);
+                            }
                         }
-                        nativeFrames[i] = copy;
+
+                        int baseIdx = chunkStart;
+                        Parallel.For(0, chunkLen, parallelOpts, offset =>
+                        {
+                            using var dst = new SKBitmap(targetInfo);
+                            chunkBitmaps[offset].ScalePixels(dst, SKFilterQuality.High);
+                            dst.SetImmutable();
+                            frames[baseIdx + offset] = SKImage.FromBitmap(dst);
+                        });
                     }
                 }
-
-                var maxParallel = Math.Clamp(Environment.ProcessorCount, 2, 16);
-                Parallel.For(0, FrameCount, new ParallelOptions { MaxDegreeOfParallelism = maxParallel }, i =>
+                finally
                 {
-                    using var src = nativeFrames[i];
-                    using var dst = new SKBitmap(targetInfo);
-                    src.ScalePixels(dst, SKFilterQuality.High);
-                    dst.SetImmutable();
-                    frames[i] = SKImage.FromBitmap(dst);
-                });
+                    for (int p = 0; p < poolLen; p++)
+                    {
+                        chunkBitmaps[p]?.Dispose();
+                    }
+                }
 
                 return frames;
             }
@@ -343,6 +366,7 @@ namespace TwitchDownloaderCore.TwitchObjects
         {
             lock (_decodeLock)
             {
+                Interlocked.Increment(ref _decodeGeneration);
                 var frames = Interlocked.Exchange(ref _emoteFrames, null);
                 if (frames is null)
                 {

@@ -6,7 +6,7 @@
     <RootNamespace>TwitchDownloaderCLI</RootNamespace>
     <Version>1.56.5</Version>
     <Copyright>Copyright © lay295 and contributors</Copyright>
-    <Description>Download and render Twitch VODs, clips, and chats</Description>
+    <Description>High-performance Twitch chat video renderer</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Platforms>AnyCPU;x64</Platforms>
     <TargetFramework>net10.0</TargetFramework>
@@ -23,6 +23,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TwitchDownloaderCore\TwitchDownloaderCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TwitchDownloaderCLI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup Label="ExcludeRemovedLegacyFiles">
+    <Compile Remove="Modes\Download*.cs;Modes\UpdateChat.cs;Modes\InfoHandler.cs;Modes\MergeTs.cs" />
+    <Compile Remove="Modes\Arguments\VideoDownloadArgs.cs;Modes\Arguments\ClipDownloadArgs.cs;Modes\Arguments\ChatDownloadArgs.cs;Modes\Arguments\ChatUpdateArgs.cs;Modes\Arguments\InfoArgs.cs;Modes\Arguments\TsMergeArgs.cs" />
   </ItemGroup>
 
 </Project>

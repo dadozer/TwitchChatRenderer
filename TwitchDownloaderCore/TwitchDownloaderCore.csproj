@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -15,13 +15,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!--<EmbeddedResource Include="Resources\InterVariable.ttf" />-->
-    <!--<EmbeddedResource Include="Resources\InterVariable-Italic.ttf" />-->
     <EmbeddedResource Include="Resources\Inter-Regular.ttf" />
     <EmbeddedResource Include="Resources\Inter-Italic.ttf" />
     <EmbeddedResource Include="Resources\Inter-Bold.ttf" />
     <EmbeddedResource Include="Resources\Inter-BoldItalic.ttf" />
-    <EmbeddedResource Include="Resources\chat-template.html" />
     <None Include="Resources\TD-License" Visible="false" />
     <EmbeddedResource Include="Resources\THIRD-PARTY-LICENSES.txt" />
   </ItemGroup>
@@ -63,8 +60,20 @@
     </EmbeddedResource>
   </ItemGroup>
 
-    <ItemGroup>
-        <InternalsVisibleTo Include="TwitchDownloaderCore.Tests" />
-    </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TwitchDownloaderCore.Tests" />
+  </ItemGroup>
+
+  <!-- Guard against stale .cs files left behind when extracting an archive over an older checkout -->
+  <ItemGroup Label="ExcludeRemovedLegacyFiles">
+    <Compile Remove="VideoDownloader.cs;ClipDownloader.cs;ChatDownloader.cs;ChatUpdater.cs;TsMerger.cs" />
+    <Compile Remove="Chat\ChatHtml.cs;Chat\ChatText.cs" />
+    <Compile Remove="Extensions\M3U8Extensions.cs" />
+    <Compile Remove="Models\M3U8*.cs;Models\ClipVideoQualit*.cs;Models\VideoQualities.cs;Models\Resolution.cs;Models\ThrottledStream.cs" />
+    <Compile Remove="Models\Interfaces\**\*.cs" />
+    <Compile Remove="Tools\ClipQualityComparer.cs;Tools\ClipVideoQualityComparer.cs;Tools\CommentIdEqualityComparer.cs;Tools\DownloadTools.cs;Tools\FfmpegConcatList.cs;Tools\FfmpegMetadata.cs;Tools\IdParse.cs;Tools\M3U8StreamQualityComparer.cs;Tools\VideoSizeEstimator.cs" />
+    <Compile Remove="TwitchObjects\Api\UnavailableMedia.cs" />
+    <Compile Remove="TwitchObjects\Gql\GqlClip*.cs;TwitchObjects\Gql\GqlCommentResponse.cs;TwitchObjects\Gql\GqlShareClipRenderStatusResponse.cs;TwitchObjects\Gql\GqlUserIdResponse.cs;TwitchObjects\Gql\GqlVideo*.cs" />
+  </ItemGroup>
 
 </Project>

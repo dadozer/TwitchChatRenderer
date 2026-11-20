@@ -1,16 +1,14 @@
 using System.Runtime.CompilerServices;
 using SkiaSharp;
+using TwitchDownloaderCore.Rendering;
 
 namespace TwitchDownloaderCore.Tests.ToolTests
 {
     // ReSharper disable once InconsistentNaming
     public class ColorVisibilityTests
     {
-        // AdjustColorVisibility should be extracted and made public at some point, but for now just use an accessor
-        [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "AdjustColorVisibility")]
-        private static extern SKColor AdjustColorVisibilityAccessor(ChatRenderer? @null, SKColor foreground, SKColor background);
-
-        private static SKColor AdjustColorVisibility(SKColor foreground, SKColor background) => AdjustColorVisibilityAccessor(null, foreground, background);
+        private static SKColor AdjustColorVisibility(SKColor foreground, SKColor background) =>
+            TextLayoutEngine.AdjustColorVisibility(foreground, background);
 
         [Fact]
         public void RenderTestPattern()

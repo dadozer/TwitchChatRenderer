@@ -4,216 +4,158 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using TwitchDownloaderCore.Extensions;
 using TwitchDownloaderCore.Tools;
 using TwitchDownloaderCore.TwitchObjects;
 
 namespace TwitchDownloaderCore.Chat
 {
+    [JsonSourceGenerationOptions(
+        AllowTrailingCommas = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString)]
+    [JsonSerializable(typeof(ChatRoot))]
+    [JsonSerializable(typeof(ChatRootInfo))]
+    [JsonSerializable(typeof(Streamer))]
+    [JsonSerializable(typeof(Video))]
+    [JsonSerializable(typeof(Comment))]
+    [JsonSerializable(typeof(List<Comment>))]
+    [JsonSerializable(typeof(List<ChatBroadcastEvent>))]
+    [JsonSerializable(typeof(EmbeddedData))]
+    [JsonSerializable(typeof(LegacyEmbeddedData))]
+    internal partial class ChatJsonContext : JsonSerializerContext;
+
     public static class ChatJson
     {
-        private static readonly JsonSerializerOptions _jsonSerializerOptions = new()
+        private static readonly ChatJsonContext _chatJsonContext = new(new JsonSerializerOptions
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             NumberHandling = JsonNumberHandling.AllowReadingFromString,
+            ReadCommentHandling = JsonCommentHandling.Skip,
             AllowTrailingCommas = true
-        };
+        });
 
         /// <summary>
-        /// Asynchronously deserializes a chat json file.
+        /// Asynchronously deserializes a chat JSON or <c>.json.gz</c> file in a single streaming pass without constructing
+        /// an intermediate <see cref="JsonDocument"/> DOM or performing hidden network requests.
+        /// Supports UTF-8 (with or without BOM), GZip-compressed streams, UTF-16 LE/BE, and UTF-32 LE/BE.
         /// </summary>
-        /// <returns>A <see cref="ChatRoot"/> representation the deserialized chat json file.</returns>
+        /// <returns>A <see cref="ChatRoot"/> representation of the deserialized chat JSON file.</returns>
         /// <exception cref="IOException">The file does not exist.</exception>
         /// <exception cref="NotSupportedException">The file is not a valid chat format.</exception>
-        public static async Task<ChatRoot> DeserializeAsync(string filePath, bool getComments = true, bool onlyFirstAndLastComments = false, bool getEmbeds = true, CancellationToken cancellationToken = default)
+        public static async Task<ChatRoot> DeserializeAsync(
+            string filePath,
+            bool getComments = true,
+            bool onlyFirstAndLastComments = false,
+            bool getEmbeds = true,
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(filePath);
 
             if (!File.Exists(filePath))
+            {
                 throw new IOException("Json file does not exist");
-
-            ChatRoot returnChatRoot = new();
-
-            JsonDocumentOptions deserializationOptions = new()
-            {
-                CommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true
-            };
-
-            await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
-
-            JsonDocument jsonDocument;
-            try
-            {
-                jsonDocument = await GetJsonDocumentAsync(fs, filePath, deserializationOptions, cancellationToken);
-            }
-            // JsonDocument buffers the whole file into one array, so it cannot read past int.MaxValue. Chats that embed
-            // GIFs can exceed that, so they are streamed instead. Streaming gives up reading only the parts that were
-            // asked for, which is why it is not the default. How it fails depends on the path: a plain file overflows
-            // while measuring, a gzipped one grows its buffer until the length wraps negative and the rent is rejected.
-            catch (Exception e) when (e is OverflowException or OutOfMemoryException or ArgumentOutOfRangeException)
-            {
-                return await DeserializeLargeAsync(filePath, getComments, getEmbeds, cancellationToken);
             }
 
-            using (jsonDocument)
-            {
-
-            if (jsonDocument.RootElement.TryGetProperty("FileInfo", out JsonElement fileInfoElement))
-            {
-                returnChatRoot.FileInfo = fileInfoElement.Deserialize<ChatRootInfo>(options: _jsonSerializerOptions);
-            }
-
-            if (jsonDocument.RootElement.TryGetProperty("schemaVersion", out JsonElement schemaVersionElement)
-                && schemaVersionElement.ValueKind == JsonValueKind.String)
-            {
-                returnChatRoot.schemaVersion = schemaVersionElement.GetString();
-            }
-
-            if (jsonDocument.RootElement.TryGetProperty("streamer", out JsonElement streamerElement))
-            {
-                returnChatRoot.streamer = streamerElement.Deserialize<Streamer>(options: _jsonSerializerOptions);
-            }
-
-            if (jsonDocument.RootElement.TryGetProperty("video", out JsonElement videoElement))
-            {
-                returnChatRoot.video = videoElement.Deserialize<Video>(options: _jsonSerializerOptions);
-            }
-
-            if (getComments)
-            {
-                if (jsonDocument.RootElement.TryGetProperty("comments", out JsonElement commentsElement))
-                {
-                    returnChatRoot.comments = onlyFirstAndLastComments
-                        ? commentsElement.DeserializeFirstAndLastFromList<Comment>(options: _jsonSerializerOptions)
-                        : commentsElement.Deserialize<List<Comment>>(options: _jsonSerializerOptions);
-                }
-
-                if (!onlyFirstAndLastComments && jsonDocument.RootElement.TryGetProperty("events", out JsonElement eventsElement)
-                    && eventsElement.ValueKind == JsonValueKind.Array)
-                {
-                    returnChatRoot.events = eventsElement.Deserialize<List<ChatBroadcastEvent>>(options: _jsonSerializerOptions) ?? [];
-                }
-            }
-
-            if (getEmbeds)
-            {
-                if (jsonDocument.RootElement.TryGetProperty("embeddedData", out JsonElement embeddedDataElement))
-                {
-                    if (returnChatRoot.FileInfo.Version > new ChatRootVersion(1, 2, 2))
-                    {
-                        returnChatRoot.embeddedData = embeddedDataElement.Deserialize<EmbeddedData>(options: _jsonSerializerOptions);
-                    }
-                    else
-                    {
-                        var legacyEmbeddedData = embeddedDataElement.Deserialize<LegacyEmbeddedData>(options: _jsonSerializerOptions);
-                        returnChatRoot.embeddedData = new EmbeddedData
-                        {
-                            firstParty = legacyEmbeddedData?.firstParty ?? [],
-                            thirdParty = legacyEmbeddedData?.thirdParty ?? [],
-                            twitchBadges = legacyEmbeddedData?.twitchBadges.Select(item => new EmbedChatBadge
-                            {
-                                name = item.name,
-                                versions = item.versions.Select(x => new KeyValuePair<string, ChatBadgeData>(x.Key, new ChatBadgeData { bytes = x.Value })).ToDictionary(k => k.Key, v => v.Value),
-                            }).ToList() ?? [],
-                            twitchBits = legacyEmbeddedData?.twitchBits ?? []
-                        };
-                    }
-                }
-                else if (jsonDocument.RootElement.TryGetProperty("emotes", out JsonElement emotesElement))
-                {
-                    returnChatRoot.embeddedData = emotesElement.Deserialize<EmbeddedData>(options: _jsonSerializerOptions);
-                }
-            }
-
-            }
-
-            await UpgradeChatJson(returnChatRoot);
-
-            return returnChatRoot;
-        }
-
-        /// <summary>Streams a chat file that is too large for <see cref="JsonDocument"/> to buffer.</summary>
-        /// <remarks>Opens the file again rather than reusing a stream, since disposing a GZipStream closes the one under it.</remarks>
-        private static async Task<ChatRoot> DeserializeLargeAsync(string filePath, bool getComments, bool getEmbeds, CancellationToken cancellationToken)
-        {
-            await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
-
-            var isGzip = fs.ReadByte() == 0x1F && fs.ReadByte() == 0x8B;
-            fs.Seek(0, SeekOrigin.Begin);
-
-            ChatRoot chatRoot;
-            if (isGzip)
-            {
-                await using var gs = new GZipStream(fs, CompressionMode.Decompress);
-                chatRoot = await JsonSerializer.DeserializeAsync<ChatRoot>(gs, _jsonSerializerOptions, cancellationToken);
-            }
-            else
-            {
-                chatRoot = await JsonSerializer.DeserializeAsync<ChatRoot>(fs, _jsonSerializerOptions, cancellationToken);
-            }
+            await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 65536, useAsync: true);
+            ChatRoot chatRoot = await DeserializeFromStreamAsync(fs, filePath, cancellationToken).ConfigureAwait(false);
 
             chatRoot ??= new ChatRoot();
+            chatRoot.FileInfo ??= new ChatRootInfo();
 
-            // Everything was parsed to get here, so honouring these only frees the memory again
             if (!getComments)
             {
                 chatRoot.comments = null;
                 chatRoot.events = [];
             }
+            else
+            {
+                chatRoot.comments ??= [];
+                if (onlyFirstAndLastComments)
+                {
+                    chatRoot.events = [];
+                    if (chatRoot.comments.Count > 2)
+                    {
+                        chatRoot.comments = [chatRoot.comments[0], chatRoot.comments[^1]];
+                    }
+                }
+                else
+                {
+                    chatRoot.events ??= [];
+                }
+            }
+
             if (!getEmbeds)
+            {
                 chatRoot.embeddedData = null;
+            }
 
-            await UpgradeChatJson(chatRoot);
-
+            UpgradeChatJson(chatRoot, getComments);
             return chatRoot;
         }
 
-        private static async Task<JsonDocument> GetJsonDocumentAsync(Stream stream, string filePath, JsonDocumentOptions deserializationOptions, CancellationToken cancellationToken = default)
+        private static async Task<ChatRoot> DeserializeFromStreamAsync(Stream stream, string filePath, CancellationToken cancellationToken)
         {
             if (!stream.CanSeek)
             {
-                // We aren't able to verify the file type. Pretend it's JSON.
-                return await JsonDocument.ParseAsync(stream, deserializationOptions, cancellationToken);
+                return await JsonSerializer.DeserializeAsync(stream, _chatJsonContext.ChatRoot, cancellationToken).ConfigureAwait(false);
             }
 
             const int RENT_LENGTH = 4;
             var rentedBuffer = ArrayPool<byte>.Shared.Rent(RENT_LENGTH);
             try
             {
-                if (await stream.ReadAsync(rentedBuffer.AsMemory(0, RENT_LENGTH), cancellationToken) != RENT_LENGTH)
+                int totalRead = 0;
+                while (totalRead < RENT_LENGTH)
                 {
-                    throw new EndOfStreamException($"{Path.GetFileName(filePath)} is not a valid chat format.");
+                    int n = await stream.ReadAsync(rentedBuffer.AsMemory(totalRead, RENT_LENGTH - totalRead), cancellationToken).ConfigureAwait(false);
+                    if (n == 0)
+                    {
+                        throw new EndOfStreamException($"{Path.GetFileName(filePath)} is not a valid chat format.");
+                    }
+                    totalRead += n;
                 }
 
-                stream.Seek(-RENT_LENGTH, SeekOrigin.Current);
-
-                // https://en.wikipedia.org/wiki/Byte_order_mark#Byte_order_marks_by_encoding
                 switch (rentedBuffer)
                 {
-                    case [0x1F, 0x8B, ..]: // https://docs.fileformat.com/compression/gz/#gz-file-header
+                    case [0x1F, 0x8B, ..]:
                     {
-                        await using var gs = new GZipStream(stream, CompressionMode.Decompress);
-                        return await GetJsonDocumentAsync(gs, filePath, deserializationOptions, cancellationToken);
+                        stream.Seek(-RENT_LENGTH, SeekOrigin.Current);
+                        await using var gs = new GZipStream(stream, CompressionMode.Decompress, leaveOpen: true);
+                        return await JsonSerializer.DeserializeAsync(gs, _chatJsonContext.ChatRoot, cancellationToken).ConfigureAwait(false);
                     }
-                    case [0x00, 0x00, 0xFE, 0xFF]: // UTF-32 BE
-                    case [0xFF, 0xFE, 0x00, 0x00]: // UTF-32 LE
+                    case [0x00, 0x00, 0xFE, 0xFF]: // UTF-32 BE (4-byte BOM already consumed)
                     {
-                        using var sr = new StreamReader(stream, Encoding.UTF32);
-                        var jsonString = await sr.ReadToEndAsync(cancellationToken);
-                        return JsonDocument.Parse(jsonString.AsMemory(), deserializationOptions);
+                        var utf32Be = new UTF32Encoding(bigEndian: true, byteOrderMark: false);
+                        await using var transcoding = Encoding.CreateTranscodingStream(stream, utf32Be, Encoding.UTF8, leaveOpen: true);
+                        return await JsonSerializer.DeserializeAsync(transcoding, _chatJsonContext.ChatRoot, cancellationToken).ConfigureAwait(false);
                     }
-                    case [0xFE, 0xFF, ..]: // UTF-16 BE
-                    case [0xFF, 0xFE, ..]: // UTF-16 LE
+                    case [0xFF, 0xFE, 0x00, 0x00]: // UTF-32 LE (4-byte BOM already consumed)
                     {
-                        using var sr = new StreamReader(stream, Encoding.Unicode);
-                        var jsonString = await sr.ReadToEndAsync(cancellationToken);
-                        return JsonDocument.Parse(jsonString.AsMemory(), deserializationOptions);
+                        var utf32Le = new UTF32Encoding(bigEndian: false, byteOrderMark: false);
+                        await using var transcoding = Encoding.CreateTranscodingStream(stream, utf32Le, Encoding.UTF8, leaveOpen: true);
+                        return await JsonSerializer.DeserializeAsync(transcoding, _chatJsonContext.ChatRoot, cancellationToken).ConfigureAwait(false);
                     }
-                    case [0xEF, 0xBB, 0xBF, ..]: // UTF-8
-                    case [(byte)'{', ..]: // Starts with a '{', probably JSON
+                    case [0xFE, 0xFF, ..]: // UTF-16 BE (seek back 2 bytes after 2-byte BOM)
                     {
-                        return await JsonDocument.ParseAsync(stream, deserializationOptions, cancellationToken);
+                        stream.Seek(-2, SeekOrigin.Current);
+                        await using var transcoding = Encoding.CreateTranscodingStream(stream, Encoding.BigEndianUnicode, Encoding.UTF8, leaveOpen: true);
+                        return await JsonSerializer.DeserializeAsync(transcoding, _chatJsonContext.ChatRoot, cancellationToken).ConfigureAwait(false);
+                    }
+                    case [0xFF, 0xFE, ..]: // UTF-16 LE (seek back 2 bytes after 2-byte BOM)
+                    {
+                        stream.Seek(-2, SeekOrigin.Current);
+                        await using var transcoding = Encoding.CreateTranscodingStream(stream, Encoding.Unicode, Encoding.UTF8, leaveOpen: true);
+                        return await JsonSerializer.DeserializeAsync(transcoding, _chatJsonContext.ChatRoot, cancellationToken).ConfigureAwait(false);
+                    }
+                    case [0xEF, 0xBB, 0xBF, ..]: // UTF-8 BOM (skip 3-byte BOM)
+                    {
+                        stream.Seek(-1, SeekOrigin.Current);
+                        return await JsonSerializer.DeserializeAsync(stream, _chatJsonContext.ChatRoot, cancellationToken).ConfigureAwait(false);
+                    }
+                    case [(byte)'{' or (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n', ..]:
+                    {
+                        stream.Seek(-RENT_LENGTH, SeekOrigin.Current);
+                        return await JsonSerializer.DeserializeAsync(stream, _chatJsonContext.ChatRoot, cancellationToken).ConfigureAwait(false);
                     }
                     default:
                     {
@@ -228,54 +170,66 @@ namespace TwitchDownloaderCore.Chat
         }
 
 #pragma warning disable CS0618 // Type or member is obsolete
-        private static async Task UpgradeChatJson(ChatRoot chatRoot)
+        private static void UpgradeChatJson(ChatRoot chatRoot, bool hasComments = true)
         {
             const int MAX_STREAM_LENGTH = 172_800; // 48 hours in seconds. https://help.twitch.tv/s/article/broadcast-guidelines
 
-            var firstComment = chatRoot.comments.FirstOrDefault();
-            var lastComment = chatRoot.comments.LastOrDefault();
+            var comments = chatRoot.comments;
+            var firstComment = comments is { Count: > 0 } ? comments[0] : null;
+            var lastComment = comments is { Count: > 0 } ? comments[^1] : null;
 
-            chatRoot.video ??= new Video
+            if (chatRoot.video is null)
             {
-                start = (int)Math.Floor(firstComment?.content_offset_seconds ?? 0),
-                end = (int)Math.Ceiling(lastComment?.content_offset_seconds ?? MAX_STREAM_LENGTH)
-            };
+                double startSec = 0;
+                double endSec = hasComments ? 0 : MAX_STREAM_LENGTH;
+
+                if (firstComment is not null && lastComment is not null)
+                {
+                    startSec = Math.Floor(firstComment.content_offset_seconds);
+                    endSec = Math.Ceiling(lastComment.content_offset_seconds);
+                }
+                else if (chatRoot.events is { Count: > 0 })
+                {
+                    startSec = Math.Floor(chatRoot.events.Min(static e => e?.content_offset_seconds ?? 0));
+                    endSec = Math.Ceiling(chatRoot.events.Max(static e => e?.content_offset_seconds ?? 0));
+                }
+
+                chatRoot.video = new Video
+                {
+                    start = Math.Max(0, startSec),
+                    end = Math.Max(Math.Max(0, startSec), endSec)
+                };
+            }
 
             chatRoot.video.id ??= firstComment?.content_id;
 
-            if (chatRoot.video.created_at == default)
-                chatRoot.video.created_at = firstComment?.created_at - TimeSpan.FromSeconds(firstComment?.content_offset_seconds ?? 0) ?? default;
+            if (chatRoot.video.created_at == default
+                && firstComment is not null
+                && firstComment.created_at != default
+                && (firstComment.created_at - DateTime.MinValue).TotalSeconds >= firstComment.content_offset_seconds)
+            {
+                chatRoot.video.created_at = firstComment.created_at - TimeSpan.FromSeconds(firstComment.content_offset_seconds);
+            }
 
             if (chatRoot.streamer is null)
             {
-                var broadcasterComment = chatRoot.comments
-                    .Where(x => x.message.user_badges != null)
-                    .FirstOrDefault(x => x.message.user_badges.Any(b => b._id.Equals("broadcaster")));
+                var broadcasterComment = comments?
+                    .Where(static x => x?.message?.user_badges != null)
+                    .FirstOrDefault(static x => x.message.user_badges.Any(static b => b?._id == "broadcaster"));
 
                 if (!int.TryParse(chatRoot.video.user_id, out var assumedId))
                 {
-                    if (chatRoot.comments.FirstOrDefault(x => int.TryParse(x.channel_id, out assumedId)) is null)
+                    if (comments?.FirstOrDefault(x => x is not null && int.TryParse(x.channel_id, out assumedId)) is null)
                     {
-                        if (!int.TryParse(broadcasterComment?.commenter._id, out assumedId))
+                        if (!int.TryParse(broadcasterComment?.commenter?._id, out assumedId))
                         {
                             assumedId = 0;
                         }
                     }
                 }
 
-                var assumedName = chatRoot.video.user_name ?? broadcasterComment?.commenter.display_name;
-                var assumedLogin = broadcasterComment?.commenter.name;
-
-                if ((assumedName is null || assumedLogin is null) && assumedId != 0)
-                {
-                    try
-                    {
-                        var userInfo = await TwitchHelper.GetUserInfo([assumedId.ToString()]);
-                        assumedName ??= userInfo.data.users.FirstOrDefault()?.displayName;
-                        assumedLogin ??= userInfo.data.users.FirstOrDefault()?.login;
-                    }
-                    catch { /* ignored */ }
-                }
+                var assumedName = chatRoot.video.user_name ?? broadcasterComment?.commenter?.display_name;
+                var assumedLogin = broadcasterComment?.commenter?.name;
 
                 chatRoot.streamer = new Streamer
                 {
@@ -285,21 +239,15 @@ namespace TwitchDownloaderCore.Chat
                 };
             }
 
-            if (chatRoot.streamer.login is null && chatRoot.streamer.id != 0)
+            if (chatRoot.video.user_name is not null)
             {
-                try
-                {
-                    var userInfo = await TwitchHelper.GetUserInfo([chatRoot.streamer.id.ToString()]);
-                    chatRoot.streamer.login = userInfo.data.users.FirstOrDefault()?.login;
-                }
-                catch { /* ignored */ }
+                chatRoot.video.user_name = null;
             }
 
-            if (chatRoot.video.user_name is not null)
-                chatRoot.video.user_name = null;
-
             if (chatRoot.video.user_id is not null)
+            {
                 chatRoot.video.user_id = null;
+            }
 
             if (chatRoot.video.duration is not null)
             {
@@ -307,10 +255,19 @@ namespace TwitchDownloaderCore.Chat
                 chatRoot.video.end = chatRoot.video.length;
                 chatRoot.video.duration = null;
             }
-
-            foreach (var comment in chatRoot.comments)
+            else if (chatRoot.video.end <= 0 && chatRoot.video.length > 0)
             {
-                if (comment.message is { bits_spent: 0 })
+                chatRoot.video.end = chatRoot.video.length;
+            }
+
+            if (comments is not { Count: > 0 })
+            {
+                return;
+            }
+
+            foreach (var comment in comments)
+            {
+                if (comment?.message is { bits_spent: 0 })
                 {
                     if (comment.bits_spent > 0)
                     {
@@ -324,11 +281,16 @@ namespace TwitchDownloaderCore.Chat
             }
 
             // Fix incorrect bits_spent value on chats between v5 shutdown and the lay295#520 fix
-            if (chatRoot.comments.All(c => c.message.bits_spent == 0))
+            if (comments.All(static c => (c?.message?.bits_spent ?? 0) == 0))
             {
-                foreach (var comment in chatRoot.comments)
+                foreach (var comment in comments)
                 {
-                    var bitMatch = TwitchRegex.BitsRegex.Match(comment.message.body);
+                    if (comment?.message?.body is not { Length: > 0 } body)
+                    {
+                        continue;
+                    }
+
+                    var bitMatch = TwitchRegex.BitsRegex.Match(body);
                     if (bitMatch.Success && int.TryParse(bitMatch.ValueSpan, out var result))
                     {
                         comment.message.bits_spent = result;
@@ -337,9 +299,9 @@ namespace TwitchDownloaderCore.Chat
             }
 
             // 300x300 avatars are overkill for chat rendering
-            foreach (var comment in chatRoot.comments)
+            foreach (var comment in comments)
             {
-                if (comment.commenter?.logo?.Contains("300x300") ?? false)
+                if (comment?.commenter?.logo?.Contains("300x300") ?? false)
                 {
                     comment.commenter.logo = comment.commenter.logo.Replace("300x300", "70x70");
                 }
@@ -352,7 +314,7 @@ namespace TwitchDownloaderCore.Chat
         /// </summary>
         public static Task SerializeAsync(Stream outputStream, ChatRoot chatRoot, CancellationToken cancellationToken)
         {
-            return JsonSerializer.SerializeAsync(outputStream, chatRoot, _jsonSerializerOptions, cancellationToken);
+            return JsonSerializer.SerializeAsync(outputStream, chatRoot, _chatJsonContext.ChatRoot, cancellationToken);
         }
     }
 }

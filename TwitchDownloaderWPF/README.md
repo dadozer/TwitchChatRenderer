@@ -8,12 +8,13 @@ It preserves the full TwitchDownloader **Chat Render** visual configurator and r
 
 ## Key Features & Additions Over Upstream TwitchDownloaderWPF
 
-1. **Shared 10x–20x Faster `TwitchDownloaderCore` Pipeline**:
-   - Because `ChatRenderGUI.exe` calls directly into the upgraded `ChatRenderer` in `TwitchDownloaderCore`, GUI renders automatically benefit from **Parallel Timeline Partitioning**, **Direct Planar YUV (`yuv420p` / `yuva420p`) Pipes**, **Pre-Converted Planar YUV Emote Blitting (`EmoteYuvFrame`)**, **O(1) Next-Transition Short-Circuiting**, **Incremental Scroll Shifting**, **On-Demand Emoji Decoding**, and **Giphy GIF Rendering**.
+1. **Shared 10x–20x Faster `TwitchDownloaderCore` Compiler & Compositor Pipeline**:
+   - Because `ChatRenderGUI.exe` calls directly into the modular `TwitchDownloaderCore` pipeline (`TimelineCompiler` -> `CanonicalTimeline` -> `SegmentCompositor` -> `FfmpegEncodeCoordinator`), GUI renders automatically benefit from **Cost-Weighted Parallel Segment Partitioning**, **Direct Planar YUV (`yuv420p` / `yuva420p`) + `-f nut` VFR Pipes**, **Multi-Background Planar YUV Emote Blitting (`EmoteSurfaceCache`)**, **O(1) Next-Transition Short-Circuiting**, **Incremental Scroll Shifting**, **In-Memory `ZipArchive` Emoji Decoding**, and **Giphy GIF Rendering**.
 2. **Parallel Segments (`0 = Auto`) Control**:
-   - Located in the **Encoding** tab (`numParallelJobs`), allowing you to choose how many concurrent FFmpeg encoding segments (`0` = Auto-scale by CPU core count & duration, `1` = Single-stream, `2`–`16` = Explicit parallel segments) are used and stitched losslessly via `ffmpeg -f concat -c copy`.
-3. **Optimized VP9 Alpha Preset Out of the Box**:
-   - Selecting **WEBM** -> **VP9** automatically uses `-deadline realtime -cpu-used 8 -row-mt 1 -lag-in-frames 0 -tile-columns 2 -tile-rows 1` along with the engine's automatic `yuva420p` planar YUV pipe and dynamic GOP scaling—matching the CLI's maximum VP9 encoding speed.
+   - Located in the **Encoding** tab (`numParallelJobs`), allowing you to choose how many concurrent FFmpeg encoding segments (`0` = Auto-scale by CPU core count, chat width, codec class, and duration; `1` = Single-stream; `2`–`16` = Explicit cost-weighted parallel segments) are used and stitched losslessly via `ffmpeg -f concat -c copy`.
+3. **Canonical Codec Registry & Width-Aware VP9 Alpha Preset**:
+   - Shares the canonical `FfmpegCodecPresets` registry with the CLI. Selecting **WEBM** (or **MKV**) -> **VP9** automatically uses `-deadline realtime -cpu-used 8 -row-mt 1 -lag-in-frames 0 -frame-parallel 1` with width-aware `-tile-columns 0/1/2`, dynamic GOP scaling, and direct `yuva420p` + `-f nut` piping.
+   - Custom per-container/codec FFmpeg input and output overrides are persisted cleanly in `%AppData%\ChatRenderGUI\ffmpeg-presets.json` (`GuiPreferences`).
 4. **Direct Multi-File Batch Rendering (No Queue Window Needed)**:
    - Click **Browse** and select **multiple** `.json` or `.json.gz` files at once.
    - When multiple files are loaded, clicking **Render** prompts you once for an **Output Folder** (`OpenFolderDialog`) and sequentially renders each chat file (`<input_name>.<ext>`) using your configured settings, updating progress and supporting clean cancellation (automatically terminating child FFmpeg processes and cleaning up `.chatrender` temp files) at any time.
@@ -21,21 +22,21 @@ It preserves the full TwitchDownloader **Chat Render** visual configurator and r
    - Use the split **Render** button dropdown -> **Partial Render** to render a specific start/end timestamp window (`HH:MM:SS`) of a chat archive.
 6. **Extended Broadcast & Chat Event Schema (`v2.0-extended`)**:
    - Full GUI configuration in the **Events & Overlays** tab for Twitch Predictions, Polls, Pinned Chat, Hype Trains, dynamic message moderation (`Strikethrough`, `ReplaceDeleted`, `Hide`, `Off`), roomstate changes, threaded replies, first-time chatter highlights, `/announce` banners, raids, channel point redemptions, Hype Chat pills, gigantified emotes, and Shared Chat badges.
-7. **Real-Time SkiaSharp Live Preview**:
-   - The right-hand **LIVE PREVIEW** panel renders a live SkiaSharp canvas preview (including a transparency checkerboard for alpha channels) that updates immediately whenever you change font family, font size, font style, colors, outlines, timestamps, alternating backgrounds, avatars, badges, or layout scaling.
+7. **Unified Production SkiaSharp Live Preview (`ChatPreviewRenderer`)**:
+   - The right-hand **LIVE PREVIEW** panel renders sample messages directly through the production `TextLayoutEngine` and `MessageSectionRenderer` over a transparency checkerboard—updating immediately as you adjust fonts, sizes, styles, colors, highlighted users, outlines, timestamps, alternating backgrounds, subscription headers, avatars, badges, or layout scaling.
 
 ---
 
 ## Configuration Tabs Overview
 
-- **General**: Canvas width (`Width`), height (`Height`), font family (`Font`), font size (`Font Size`), font style (`Normal`, `Bold`, `Italic`, `Bold Italic`), base/alternate/message/highlight colors, timestamps, outlines, and subscription notices.
-- **Rendering**: Toggle **BTTV**, **FFZ**, **7TV**, **Giphy GIFs**, **Unlisted 7TV Emotes**, **Avatars**, **Chat Badges**, **Emoji Vendor** (`Google Noto Color`, `Twitter Twemoji`, or `None`), **Offline Mode**, **Dispersion**, **GIF Max Height (%)** (`5`–`100%`), and **Image Cache (MB)** (`0 = Unlimited`, up to `16384` MB). Filter specific badges via the **Filter Chat Badges** checklist or hide/highlight specific users and banned words.
+- **General**: Canvas width (`Width`), height (`Height`), font family (`Font`), font size (`Font Size`), font style (`Normal`, `Bold`, `Italic`, `BoldItalic`), base/alternate/message/highlight colors, timestamps, outlines, and subscription notices.
+- **Rendering**: Toggle **BTTV**, **FFZ**, **7TV**, **Giphy GIFs**, **Avatars**, **Chat Badges**, **Emoji Vendor** (`Google Noto Color`, `Twitter Twemoji`, or `None`), **Offline Mode**, **Dispersion**, **Adjust Username Visibility**, **GIF Max Height (%)** (`1`–`100%`, default `33%`), and **Image Cache (MB)** (`>= 16` MB, default `256` MB). Filter specific badges via the **Filter Chat Badges** checklist or hide/highlight specific users and banned words.
 - **Events & Overlays**:
   - **Top Overlay Widgets**: Independently set **Predictions** (default `Sticky Top`), **Polls** (default `Sticky Top`, with full-width vertically stacked choice rows), **Pinned Chat** (default `Sticky Top`), and **Hype Train** (default `Chat Scroll`) to `Sticky Top`, `Chat Scroll`, or `Off`. Sticky widgets coexist up to 25% of the frame height and prioritize *Open/Resolved Prediction > Poll > Pinned Chat > Closed Prediction > Hype Train*, lingering 15s after resolution.
-  - **Moderation & Roomstate**: Choose **Moderated Messages** behavior (`Dim & Strikethrough` default, `Replace with <message deleted>`, `Hide Completely`, or `Off`), toggle **Show Moderation System Notices** (default `On`), toggle **Apply Clear All** (default `Off`), and toggle **Show Roomstate Mode Notices** (default `On`, automatically suppressing initial channel-join baseline snapshots).
+  - **Moderation & Roomstate**: Choose **Moderated Messages** behavior (`Dim / Strikethrough` default, `Replace (<message deleted>)`, `Hide Completely`, or `Off`), toggle **Show Moderation System Notices** (default `On`), toggle **Apply Clear All** (default `Off`), and toggle **Show Roomstate Mode Notices** (default `On`, automatically suppressing initial channel-join baseline snapshots).
   - **Chat Enrichments & Compact Sub/Gift/Streak Headers**: Individually toggle **Threaded Replies (`↱ @User`)**, **First-Time / Returning Chatter Highlight** (`#FFB800` gold / `#00C8FF` sky blue accent bar + 11% tint), **Announcements (`/announce`)**, **Raid Notices**, **Channel Point Redemptions** (including `#6B9E82` gray-green highlighted messages), **Paid Hype Chat Pill**, **Bits Power-Ups / Gigantified Emotes**, and **Shared Chat Small Badge** (all default `On`), alongside compact 1-line Subscription, Gift Subscription (`Gifter → Recipient`), and Watch Streak headers.
-- **Scaling**: Fine-grained multipliers (`0.1x` – `4.0x`) for Emotes, Badges, Emojis, Avatars, Vertical Spacing, Side Padding, Section Height, Word Space, Emote Space, Accent Stroke, Accent Indent, and Username Scale.
-- **Encoding**: Container format (`MP4`, `MOV`, `WEBM`, `MKV`), Video Codec (`H264`, `H264 NVIDIA`, `H265`, `H265 NVIDIA`, `VP8`, `VP9`, `ProRes 4444`, `RLE`), Framerate (`FPS`), Update Rate, **Parallel Segments (`0 = Auto`)**, Alpha Mask generation (`Generate Mask`), Sharpening, and custom FFmpeg input/output arguments.
+- **Scaling**: Fine-grained multipliers for Emotes, Badges, Emojis, Avatars, Vertical Spacing, Side Padding, Section Height, Word Space, Emote Space, Accent Stroke, Accent Indent, Outline Scale, and Username Scale.
+- **Encoding**: Container format (`MP4`, `MOV`, `WEBM`, `MKV`), Video Codec (`H264`, `H264 NVIDIA`, `H264 AMD`, `H265`, `H265 NVIDIA`, `H265 AMD`, `VP8`, `VP9`, `ProRes`, `RLE` — with native alpha transparency supported on `VP8`, `VP9`, `ProRes`, and `RLE`), Framerate (`FPS`), Update Rate, **Parallel Segments (`0 = Auto`)**, Alpha Mask generation (`Generate Mask`), Sharpening (`smartblur` composed into `-vf` without disabling planar YUV/NUT piping), and custom FFmpeg input/output arguments.
 
 ---
 

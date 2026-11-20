@@ -24,8 +24,9 @@ namespace TwitchDownloaderWPF
 
         private void Window_Initialized(object sender, EventArgs e)
         {
-            startSeconds = (int)Math.Floor(CurrentRender.chatRoot.video.start);
-            endSeconds = (int)Math.Ceiling(CurrentRender.chatRoot.video.end);
+            var video = CurrentRender?.chatRoot?.video;
+            startSeconds = (int)Math.Floor(video?.start ?? 0);
+            endSeconds = Math.Max(startSeconds, (int)Math.Ceiling(video?.end ?? 0));
 
             numStart.Text = startSeconds.ToString(CultureInfo.CurrentCulture);
             numEnd.Text = endSeconds.ToString(CultureInfo.CurrentCulture);

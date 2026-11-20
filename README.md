@@ -13,8 +13,8 @@
 - **`ChatRenderCLI.exe`** — A standalone, 100% drop-in compatible command-line renderer for scripts, automated VOD pipelines, and power users.
 - **`ChatRenderGUI.exe`** — A streamlined, single-window Windows WPF desktop application focused exclusively on chat rendering, live previewing, and direct multi-file batch rendering.
 
-Built on **.NET 10**, **SkiaSharp**, and **FFmpeg**, the rendering pipeline has been re-engineered from the ground up to eliminate CPU, memory-bandwidth, and encoder bottlenecks—achieving **10x to 20x faster total render speeds** (and up to **30x+ faster** on high-framerate 60/120 FPS transparent WebM VP9 overlays) while maintaining pixel-accurate visual parity with upstream TwitchDownloader.
-Built by Gemini 4 Argon.
+Built on **.NET 10**, **SkiaSharp**, and **FFmpeg**, the engine compiles raw `.json` / `.json.gz` chat archives into an immutable **`CanonicalTimeline`** IR (`TimelineCompiler`) and executes a unified `1..N` segment compositor pipeline (`AssetCatalog`, `TextLayoutEngine`, `MessageSectionRenderer`, `StickyOverlayRenderer`, `SegmentCompositor`, `FfmpegEncodeCoordinator`)—achieving **10x to 20x faster total render speeds** (and up to **30x+ faster** on high-framerate 60/120 FPS transparent WebM VP9 overlays) while maintaining pixel-accurate visual parity with upstream TwitchDownloader.
+
 ---
 
 ## 100% Drop-In TwitchDownloader Compatibility
@@ -38,12 +38,12 @@ Built by Gemini 4 Argon.
 | :--- | :--- | :--- |
 | **Multi-Process Encoding (`-j` / `--jobs`)** | Single FFmpeg process; bottlenecked by single-encoder VP9 alpha / ProRes threading limits | **Parallel Timeline Partitioning**: Splits the render timeline into `N` concurrent segments across isolated worker instances and losslessly stitches them via `ffmpeg -f concat -c copy` |
 | **Color Conversion & Pipe I/O** | Writes raw 4-byte/pixel `bgra` over `stdin`; forces FFmpeg to run single-threaded `swscale` on every frame | **Direct Planar YUV (`yuv420p` / `yuva420p`)**: Converts frames in C# via precomputed BT.601 LUTs and 64-bit uniform block fast-paths, cutting pipe bandwidth by **37.5%–62.5%** and eliminating `swscale` |
-| **Animated Emote Composition** | Re-composites the entire canvas in `BGRA` and re-converts the full frame to YUV on every animation tick | **Pre-Converted Planar YUV Emote Cache (`EmoteYuvFrame`) & Dirty-Rect Patching**: Converts emote/GIF frames to planar YUV+A once on first draw and blits only advancing emote rectangles directly into the YUV buffer |
-| **High-FPS Idle & Animation Ticks** | Iterates through all active emotes and copies buffers on every tick | **O(1) Next-Transition Short-Circuiting (`_animNextChangeTickMs`)**: Skips ticks where no emote changes frame in `< 0.001 ms` and uses zero-allocation repeat frame tracking |
+| **Animated Emote Composition** | Re-composites the entire canvas in `BGRA` and re-converts the full frame to YUV on every animation tick | **Multi-Background Planar YUV Cache (`EmoteSurfaceCache`) & Dirty-Rect Patching**: Pre-bakes emote/GIF frames per active row background (standard, alternating, highlighted user) with generation-safe LRU invalidation and blits directly into YUV memory |
+| **High-FPS Idle & Animation Ticks** | Iterates through all active emotes and copies buffers on every tick | **O(1) Next-Transition Short-Circuiting (`AnimNextChangeTickMs`)**: Streams each unique frame once over a timestamped `-f nut` pipe (`FfmpegPipelineBuilder`, even when `--sharpening` is enabled) |
 | **Chat Scrolling** | Redraws the entire visible comment stack on every scroll step | **Incremental Scroll Shifting**: Shifts existing canvas pixels upward in memory and rasterizes only newly revealed bottom rows |
-| **Startup & Emoji Loading** | Decodes all ~3,689 emoji PNGs upfront; runs `O(Emotes × Comments)` regex scans | **On-Demand Emoji Decoding & Single-Pass Span Tokenizer**: Indexes emoji filenames in `< 1 ms` (decoding only used emojis) and tokenizes all comments in a single `O(N)` pass |
-| **Lookahead Pre-Rendering** | Sequential main-thread comment layout and frame extraction | **Hardware-Adaptive Lookahead Workers**: Pre-renders upcoming `CommentSection` bitmaps and pre-decodes multi-frame emotes/GIFs on background worker threads |
-| **Alpha Mask Generation (`--generate-mask`)** | Scalar byte-by-byte alpha extraction | **SIMD Vectorized Masking**: `AVX-512BW`, `AVX2`, `SSSE3`, and ARM64 `AdvSimd` intrinsics processing up to 64 bytes per instruction |
+| **Startup, Offline Purity & Emoji Loading** | Decodes all ~3,689 emoji PNGs upfront; mutates `ChatRoot` during render; leaks HTTP user lookups in JSON parser | **Immutable `TimelineCompiler` & In-Memory `ZipArchive` Emojis**: Pure single-pass streaming JSON load (`ChatJson`), non-mutating `CanonicalTimeline` IR (zero `Comment.Clone`), and zero-disk emoji indexing |
+| **Lookahead Pre-Rendering & Live Preview** | Sequential main-thread layout; separate mock preview drawer in GUI | **Unified Production Layout & Preview (`ChatPreviewRenderer`)**: Background sliding-window lookahead per worker and live GUI previews rendered through the real `MessageSectionRenderer` |
+| **Alpha Mask Generation (`--generate-mask`)** | Scalar byte-by-byte alpha extraction | **SIMD Vectorized Masking (`SimdPixelConverter`)**: `AVX-512BW`, `AVX2`, `SSSE3`, and ARM64 `AdvSimd` intrinsics processing up to 64 bytes per instruction |
 
 ### 2. New Features & Capabilities
 - **Giphy GIF Chat Rendering (`--giphy`, `--gif-max-height-percent`)**:
@@ -58,7 +58,7 @@ Built by Gemini 4 Argon.
 - **Smart Embedded `"Inter"` Font Resolution**:
   - Bundles the complete **Inter** font family (`Inter Embedded`). Passing `--font Inter` automatically checks if `"Inter"` is installed in the host OS font catalog and seamlessly falls back to the embedded Inter typeface instead of defaulting to Arial or Segoe UI.
 - **Automatic WebM VP9 Alpha Optimization**:
-  - Automatically detects `libvpx-vp9` with `yuva420p` and configures row-based multithreading (`-row-mt 1`), speed tuning (`-cpu-used 8`), lookahead (`-lag-in-frames 25`, `-auto-alt-ref 1`), and timeline-friendly keyframe intervals (`-g <fps*8>`) for smooth timeline scrubbing in Premiere Pro, DaVinci Resolve, and Wondershare Filmora.
+  - Automatically detects `libvpx-vp9` with `yuva420p` and configures realtime non-RD multi-threading (`-deadline realtime`, `-cpu-used 8`, `-row-mt 1`, `-lag-in-frames 0`, `-frame-parallel 1`), width-aware tile columns (`-tile-columns 0/1/2` based on `<512px` / `<1024px` / `1024px+` panel widths), and timeline-friendly keyframe intervals (`-g <clamp(fps*8, 120, 600)>`) for smooth scrubbing in Premiere Pro, DaVinci Resolve, and Wondershare Filmora.
 - **Extended Chat & Broadcast Event Schema (`v2.0-extended`)**:
   - Full support for live EventSub/IRC enriched `comments[]` and timeline `events[]` alongside 100% backward compatibility with standard TwitchDownloader `.json` files.
   - **Top Overlay Widgets (`StickyTop` | `ChatScroll` | `Off`)**: Render Predictions, Polls (with full-width vertical choice progress rows), Pinned Chat, and Hype Trains either as compact Twitch-authentic sticky headers (coexisting up to 25% of canvas height with priority ordering: *Open/Resolved Prediction > Poll > Pinned Chat > Locked Prediction > Hype Train*, lingering 15s on resolution) or as 1-line scrolling chat notifications.
@@ -69,9 +69,9 @@ Built by Gemini 4 Argon.
   - **Dynamic Timestamp-Accurate Moderation (`clearchat` & `clearmsg`)**: Messages appear normally when sent and dynamically transition to dimmed + strikethrough (`Strikethrough`, default) or `<message deleted>` (`ReplaceDeleted`) at the exact moderation timestamp, accompanied by optional 1-line moderation notices (`"user was timed out for 600s."`).
   - **Unified Left Accent Bars & Rich Chat Elements**: Consistent left accent bar thickness (`AccentStrokeWidth`), indentation (`AccentIndentWidth`), and subtle `28`-alpha (~11% opacity) row tints across `/announce` banners (`BLUE`, `GREEN`, `ORANGE`, `PURPLE`, `PRIMARY`), Channel Point Highlighted Messages (gray-green `#6B9E82`), First-Time Chatters (gold `#FFB800`), Returning Chatters (sky blue `#00C8FF`), Paid Hype Chat inline currency pills, compact single-line threaded replies (`↱ @Parent: ...`), raid notices, channel point redemptions, gigantified `2.0x` emotes, baseline-aware roomstate mode notices, and inline Shared Chat badges.
 - **Streamlined `ChatRenderGUI.exe` (Windows WPF Desktop App)**:
-  - Launches directly into the **Chat Render** workspace with a real-time SkiaSharp live preview.
+  - Launches directly into the **Chat Render** workspace with a real-time SkiaSharp live preview driven by the production `TextLayoutEngine` and `MessageSectionRenderer` (`ChatPreviewRenderer`).
   - Includes a dedicated **Events & Overlays** configuration tab to customize or disable every `v2.0-extended` widget, moderation behavior, and chat enrichment.
-  - Adds a **Parallel Segments (`0 = Auto`)** control on the Encoding tab and supports **Direct Multi-File Batch Rendering** when selecting multiple `.json` / `.json.gz` files via **Browse**.
+  - Shares canonical `FfmpegCodecPresets` with the CLI, stores custom FFmpeg preset overrides cleanly in `%AppData%\ChatRenderGUI\ffmpeg-presets.json`, adds a **Parallel Segments (`0 = Auto`)** control on the Encoding tab, and supports **Direct Multi-File Batch Rendering** when selecting multiple `.json` / `.json.gz` files via **Browse**.
 
 ---
 

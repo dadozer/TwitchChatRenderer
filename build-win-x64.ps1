@@ -14,6 +14,55 @@ try {
     $WpfProjectPath = Join-Path $ScriptDir "TwitchDownloaderWPF\TwitchDownloaderWPF.csproj"
     $OutputDir = Join-Path $ScriptDir "dist\win-x64"
 
+    $StalePaths = @(
+        "TwitchDownloaderCore\ChatRenderer.ExtendedEvents.cs",
+        "TwitchDownloaderCore\Chat\ChatHtml.cs",
+        "TwitchDownloaderCore\Chat\ChatText.cs",
+        "TwitchDownloaderCore\Resources\chat-template.html",
+        "TwitchDownloaderCore\Resources\InterVariable.ttf",
+        "TwitchDownloaderCore\Resources\InterVariable-Italic.ttf",
+        "TwitchDownloaderCore\Extensions\M3U8Extensions.cs",
+        "TwitchDownloaderCore\Models\M3U8.cs",
+        "TwitchDownloaderCore\Models\M3U8Parse.cs",
+        "TwitchDownloaderCore\Models\M3U8VideoQualities.cs",
+        "TwitchDownloaderCore\Models\M3U8VideoQuality.cs",
+        "TwitchDownloaderCore\Models\ClipVideoQualities.cs",
+        "TwitchDownloaderCore\Models\ClipVideoQuality.cs",
+        "TwitchDownloaderCore\Models\VideoQualities.cs",
+        "TwitchDownloaderCore\Models\Resolution.cs",
+        "TwitchDownloaderCore\Models\ThrottledStream.cs",
+        "TwitchDownloaderCore\Models\Interfaces",
+        "TwitchDownloaderCore\Tools\ClipQualityComparer.cs",
+        "TwitchDownloaderCore\Tools\ClipVideoQualityComparer.cs",
+        "TwitchDownloaderCore\Tools\CommentIdEqualityComparer.cs",
+        "TwitchDownloaderCore\Tools\DownloadTools.cs",
+        "TwitchDownloaderCore\Tools\FfmpegConcatList.cs",
+        "TwitchDownloaderCore\Tools\FfmpegMetadata.cs",
+        "TwitchDownloaderCore\Tools\IdParse.cs",
+        "TwitchDownloaderCore\Tools\M3U8StreamQualityComparer.cs",
+        "TwitchDownloaderCore\Tools\VideoSizeEstimator.cs",
+        "TwitchDownloaderCore\TwitchObjects\Api\UnavailableMedia.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlClipResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlClipSearchResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlClipTokenResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlCommentResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlShareClipRenderStatusResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlUserIdResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlVideoChapterResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlVideoResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlVideoSearchResponse.cs",
+        "TwitchDownloaderCore\TwitchObjects\Gql\GqlVideoTokenResponse.cs",
+        "TwitchDownloaderCore.Tests\ModelTests\M3U8Tests.cs",
+        "TwitchDownloaderCore.Tests\ModelTests\M3U8VideoQualitiesTests.cs",
+        "TwitchDownloaderCore.Tests\ToolTests\IdParseTests.cs"
+    )
+    foreach ($Rel in $StalePaths) {
+        $Full = Join-Path $ScriptDir $Rel
+        if (Test-Path $Full) {
+            Remove-Item -LiteralPath $Full -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     Write-Host "`n[1/2] Publishing ChatRenderCLI.exe..." -ForegroundColor Cyan
     dotnet publish $CliProjectPath `
         -c Release `

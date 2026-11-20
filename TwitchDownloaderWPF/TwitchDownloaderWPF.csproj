@@ -63,4 +63,8 @@
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
     </None>
   </ItemGroup>
+  <ItemGroup Label="ExcludeRemovedLegacyFiles">
+    <Page Remove="PageVodDownload.xaml;PageClipDownload.xaml;PageChatDownload.xaml;PageChatUpdate.xaml;PageQueue.xaml;Themes\**\*.xaml" />
+    <Compile Remove="PageVodDownload.xaml.cs;PageClipDownload.xaml.cs;PageChatDownload.xaml.cs;PageChatUpdate.xaml.cs;PageQueue.xaml.cs" />
+  </ItemGroup>
 </Project>
