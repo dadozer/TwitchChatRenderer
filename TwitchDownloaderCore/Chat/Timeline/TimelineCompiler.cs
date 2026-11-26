@@ -116,7 +116,8 @@ namespace TwitchDownloaderCore.Chat.Timeline
                     realEntries,
                     syntheticEntries,
                     stickyEvents,
-                    options);
+                    options,
+                    logger);
             }
 
             if (options.ModerationMode == ModerationDisplayMode.Hide && realEntries.Count > 0)
@@ -867,7 +868,8 @@ namespace TwitchDownloaderCore.Chat.Timeline
             List<MutableTimelineEntry> realEntries,
             List<MutableTimelineEntry> syntheticEntries,
             List<StickyOverlayEvent> stickyEvents,
-            ChatRenderOptions options)
+            ChatRenderOptions options,
+            ITaskLogger? logger)
         {
             var sortedEvents = new List<ChatBroadcastEvent>(rawEvents.Count);
             for (int i = 0; i < rawEvents.Count; i++)
@@ -949,15 +951,26 @@ namespace TwitchDownloaderCore.Chat.Timeline
             bool hypeTrainActive = false;
             var seenOutgoingRaids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            int skippedMissingTypeCount = 0;
+            int skippedInvalidDataCount = 0;
+
             foreach (var ev in sortedEvents)
             {
                 if (ev.data.ValueKind != JsonValueKind.Object)
                 {
+                    skippedInvalidDataCount++;
+                    continue;
+                }
+
+                string? normalizedEventType = ev.event_type?.Trim().ToLowerInvariant();
+                if (string.IsNullOrEmpty(normalizedEventType))
+                {
+                    skippedMissingTypeCount++;
                     continue;
                 }
 
                 var d = ev.data;
-                switch (ev.event_type)
+                switch (normalizedEventType)
                 {
                     case "clearmsg":
                     {
@@ -1396,6 +1409,16 @@ namespace TwitchDownloaderCore.Chat.Timeline
                     }
                 }
             }
+
+            if (skippedMissingTypeCount > 0)
+            {
+                logger?.LogWarning($"Skipped {skippedMissingTypeCount:N0} broadcast event(s) missing 'event_type'/'type'.");
+            }
+
+            if (skippedInvalidDataCount > 0)
+            {
+                logger?.LogWarning($"Skipped {skippedInvalidDataCount:N0} broadcast event(s) with missing or non-object 'data'.");
+            }
         }
 
         private static PredictionOverlayEvent ParsePredictionStickyEvent(ChatBroadcastEvent ev)
@@ -1423,7 +1446,7 @@ namespace TwitchDownloaderCore.Chat.Timeline
 
             return new PredictionOverlayEvent(
                 ev.content_offset_seconds,
-                ev.carried_over,
+                ev.carried_over ?? false,
                 predId,
                 title,
                 status,
@@ -1459,7 +1482,7 @@ namespace TwitchDownloaderCore.Chat.Timeline
 
             return new PollOverlayEvent(
                 ev.content_offset_seconds,
-                ev.carried_over,
+                ev.carried_over ?? false,
                 pollId,
                 pubsubType,
                 status,
@@ -1505,7 +1528,7 @@ namespace TwitchDownloaderCore.Chat.Timeline
 
             return new PinnedChatOverlayEvent(
                 ev.content_offset_seconds,
-                ev.carried_over,
+                ev.carried_over ?? false,
                 action,
                 pinId,
                 type,
@@ -1528,7 +1551,7 @@ namespace TwitchDownloaderCore.Chat.Timeline
 
             return new HypeTrainOverlayEvent(
                 ev.content_offset_seconds,
-                ev.carried_over,
+                ev.carried_over ?? false,
                 pubsubType,
                 rawLevel,
                 rawGoal,

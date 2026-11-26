@@ -337,7 +337,22 @@ namespace TwitchDownloaderCore.TwitchObjects
         public double content_offset_seconds { get; set; }
         public string source { get; set; }
         public string event_type { get; set; }
-        public bool carried_over { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("type")]
+        public string legacy_type
+        {
+            get => null;
+            set
+            {
+                if (string.IsNullOrEmpty(event_type))
+                {
+                    event_type = value;
+                }
+            }
+        }
+
+        public bool? carried_over { get; set; }
         public System.Text.Json.JsonElement data { get; set; }
     }
 

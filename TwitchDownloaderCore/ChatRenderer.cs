@@ -95,7 +95,8 @@ namespace TwitchDownloaderCore
             _progress.SetStatus("Fetching Images [1/2]");
             await _assets.LoadAsync(chatRoot, _progress, cancellationToken).ConfigureAwait(false);
 
-            var timeline = TimelineCompiler.Compile(chatRoot, _renderOptions);
+            var timeline = TimelineCompiler.Compile(chatRoot, _renderOptions, _progress);
+            _progress.LogVerbose($"Compiled timeline: {timeline.Messages.Count:N0} messages, {chatRoot.events?.Count ?? 0:N0} broadcast events ({timeline.StickyEvents.Count:N0} sticky overlay events).");
             var (startTick, endTick, totalTicks) = timeline.GetTickRange(_renderOptions);
             var segments = SegmentPartitioner.PlanSegments(timeline, _renderOptions, startTick, endTick);
 

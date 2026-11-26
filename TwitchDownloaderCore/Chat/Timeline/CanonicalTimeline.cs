@@ -202,17 +202,14 @@ namespace TwitchDownloaderCore.Chat.Timeline
         public (int StartTick, int EndTick, int TotalTicks) GetTickRange(ChatRenderOptions options)
         {
             int framerate = Math.Max(1, options.Framerate);
-            if (options.StartOverride != -1 && options.EndOverride != -1)
-            {
-                int startTick = options.StartOverride * framerate;
-                int totalTicks = Math.Max(0, options.EndOverride * framerate - startTick);
-                return (startTick, startTick + totalTicks, totalTicks);
-            }
-
-            int startSeconds = (int)Math.Floor(Video.StartSeconds);
-            int videoStartTick = startSeconds * framerate;
-            int videoTotalTicks = Math.Max(0, (int)Math.Ceiling(Video.EndSeconds * framerate) - videoStartTick);
-            return (videoStartTick, videoStartTick + videoTotalTicks, videoTotalTicks);
+            int startTick = options.StartOverride >= 0
+                ? options.StartOverride * framerate
+                : (int)Math.Floor(Video.StartSeconds) * framerate;
+            int endTick = options.EndOverride >= 0
+                ? options.EndOverride * framerate
+                : (int)Math.Ceiling(Video.EndSeconds * framerate);
+            int totalTicks = Math.Max(0, endTick - startTick);
+            return (startTick, startTick + totalTicks, totalTicks);
         }
     }
 }

@@ -203,5 +203,137 @@ namespace TwitchDownloaderCore.Tests.ModelTests
             Assert.Equal("視聴者名", cjk.FormattedLabel);
             Assert.Equal('視', cjk.FirstNonAsciiCodepoint);
         }
+
+        [Fact]
+        public async Task StreamingDeserializeAsync_LoadsBroadcastEvents_SupportsTypeAliasAndNullableCarriedOver_AndRendersStickyOverlay()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "ChatRenderStickyEventsTest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+
+            try
+            {
+                string eventsJson = """
+                {
+                  "schemaVersion": "2.0-extended",
+                  "streamer": { "name": "TestBroadcaster", "login": "testbroadcaster", "id": 12345 },
+                  "video": { "start": 0, "end": 120, "length": 120 },
+                  "comments": [],
+                  "events": [
+                    {
+                      "_id": "ev-pred-1",
+                      "content_offset_seconds": 10.0,
+                      "event_type": "prediction",
+                      "carried_over": null,
+                      "data": {
+                        "prediction_id": "pred-1",
+                        "title": "Will they beat the boss?",
+                        "status": "ACTIVE",
+                        "prediction_window_seconds": 120,
+                        "outcomes": [
+                          { "id": "o1", "title": "Yes", "color": "BLUE", "total_points": 5000, "total_users": 10 },
+                          { "id": "o2", "title": "No", "color": "PINK", "total_points": 2500, "total_users": 5 }
+                        ]
+                      }
+                    },
+                    {
+                      "_id": "ev-poll-1",
+                      "content_offset_seconds": 12.0,
+                      "type": "poll",
+                      "data": {
+                        "poll_id": "poll-1",
+                        "title": "Next game?",
+                        "status": "ACTIVE",
+                        "duration_seconds": 60,
+                        "total_voters": 20,
+                        "choices": [
+                          { "choice_id": "c1", "title": "Zelda", "total_voters": 14 },
+                          { "choice_id": "c2", "title": "Mario", "total_voters": 6 }
+                        ]
+                      }
+                    },
+                    {
+                      "_id": "ev-pin-1",
+                      "content_offset_seconds": 15.0,
+                      "event_type": "PINNED_CHAT",
+                      "data": {
+                        "action": "pin-message",
+                        "pin_id": "pin-1",
+                        "message_text": "Welcome to the run!",
+                        "sender_display_name": "ModUser",
+                        "sender_color": "#00FF7F"
+                      }
+                    }
+                  ]
+                }
+                """;
+
+                string jsonPath = Path.Combine(tempDir, "sticky_events.json");
+                await File.WriteAllTextAsync(jsonPath, eventsJson, new UTF8Encoding(false));
+
+                var root = await ChatJson.DeserializeAsync(jsonPath, getComments: true, onlyFirstAndLastComments: false, getEmbeds: true);
+                Assert.Equal(3, root.events.Count);
+                Assert.Equal("prediction", root.events[0].event_type);
+                Assert.Null(root.events[0].carried_over);
+                Assert.Equal("poll", root.events[1].event_type);
+                Assert.Equal("PINNED_CHAT", root.events[2].event_type);
+
+                using (var outMs = new MemoryStream())
+                {
+                    await ChatJson.SerializeAsync(outMs, root, CancellationToken.None);
+                    string serialized = Encoding.UTF8.GetString(outMs.ToArray());
+                    Assert.Contains("\"event_type\":\"poll\"", serialized);
+                    Assert.DoesNotContain("\"type\":\"poll\"", serialized);
+                }
+
+                var options = new ChatRenderOptions
+                {
+                    ChatWidth = 640,
+                    ChatHeight = 1008,
+                    BackgroundColor = new SKColor(0x33000000),
+                    MessageColor = SKColors.White,
+                    Font = "Inter Embedded",
+                    FontSize = 24,
+                    PredictionMode = OverlayWidgetMode.StickyTop,
+                    PollMode = OverlayWidgetMode.StickyTop,
+                    PinnedChatMode = OverlayWidgetMode.StickyTop
+                };
+
+                var timeline = TwitchDownloaderCore.Chat.Timeline.TimelineCompiler.Compile(root, options);
+                Assert.Equal(3, timeline.StickyEvents.Count);
+                Assert.IsType<TwitchDownloaderCore.Chat.Timeline.PredictionOverlayEvent>(timeline.StickyEvents[0]);
+                Assert.IsType<TwitchDownloaderCore.Chat.Timeline.PollOverlayEvent>(timeline.StickyEvents[1]);
+                Assert.IsType<TwitchDownloaderCore.Chat.Timeline.PinnedChatOverlayEvent>(timeline.StickyEvents[2]);
+
+                var tracker = new StickyOverlayTracker(timeline.StickyEvents, options);
+                tracker.AdvanceTo(20.0);
+                Assert.True(tracker.HasAnyActive);
+                Assert.NotNull(tracker.Prediction);
+                Assert.NotNull(tracker.Poll);
+                Assert.NotNull(tracker.PinnedChat);
+
+                using var layout = new TextLayoutEngine(options);
+                using var assets = new AssetCatalog(options, tempDir, layout.BaseOutlinePaint);
+                var stickyRenderer = new StickyOverlayRenderer(options, assets, layout);
+
+                using var bitmap = new SKBitmap(options.ChatWidth, options.ChatHeight);
+                using var canvas = new SKCanvas(bitmap);
+                canvas.Clear(options.BackgroundColor);
+
+                int stickyHeight = stickyRenderer.DrawStickyTopOverlays(canvas, tracker, 20.0, layout.GetWorkerContext());
+                canvas.Flush();
+
+                Assert.True(stickyHeight > 0);
+                Assert.Equal(0, stickyHeight & 1);
+                // Top sticky card paints an opaque/near-opaque card over the translucent background
+                Assert.NotEqual(options.BackgroundColor, bitmap.GetPixel(options.ChatWidth / 2, 10));
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                }
+            }
+        }
     }
 }

@@ -555,7 +555,7 @@ namespace TwitchDownloaderCore.Rendering
 
             if (tracker.Prediction is not null)
             {
-                bool isLocked = tracker.Prediction.Status == "LOCKED";
+                bool isLocked = tracker.Prediction.Status is "LOCKED" or "RESOLVE_PENDING";
                 bool isOpen = tracker.Prediction.Status == "ACTIVE";
                 int outcomeCount = Math.Clamp(tracker.Prediction.Outcomes.Count, 2, 10);
                 int h = isOpen
@@ -678,7 +678,7 @@ namespace TwitchDownloaderCore.Rendering
             bool isOpen = pred.Status == "ACTIVE";
             string statusTag = pred.Status switch
             {
-                "LOCKED" => "LOCKED",
+                "LOCKED" or "RESOLVE_PENDING" => "LOCKED",
                 "RESOLVED" => "RESOLVED",
                 "CANCELED" => "CANCELED",
                 _ => FormatCountdownSeconds(Math.Max(0, (int)Math.Ceiling(pred.WindowSeconds - (currentTimeSeconds - pred.StartedOffsetSeconds))))

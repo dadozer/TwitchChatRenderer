@@ -299,5 +299,95 @@ namespace TwitchDownloaderCore.Tests.ModelTests
             }
             Assert.True(distinctColors.Count > 12, $"Expected rich multi-color preview output, got {distinctColors.Count} distinct colors.");
         }
+
+        [Fact]
+        public void CanonicalTimeline_GetTickRange_SupportsIndependentStartAndEndOverrides()
+        {
+            var timeline = new CanonicalTimeline(
+                new StreamerIdentity("Host", "host", 1),
+                new VideoTimelineBounds("1", "Test VOD", DateTime.UtcNow, StartSeconds: 10.0, EndSeconds: 100.0, LengthSeconds: 90.0),
+                [],
+                []);
+
+            // Neither override set -> falls back to video.start..video.end
+            var defaultRange = timeline.GetTickRange(new ChatRenderOptions { Framerate = 60, StartOverride = -1, EndOverride = -1 });
+            Assert.Equal((600, 6000, 5400), defaultRange);
+
+            // Standalone -e without -b -> uses video.start to EndOverride
+            var endOnlyRange = timeline.GetTickRange(new ChatRenderOptions { Framerate = 60, StartOverride = -1, EndOverride = 250 });
+            Assert.Equal((600, 15000, 14400), endOnlyRange);
+
+            // Standalone -b without -e -> uses StartOverride to video.end
+            var startOnlyRange = timeline.GetTickRange(new ChatRenderOptions { Framerate = 60, StartOverride = 30, EndOverride = -1 });
+            Assert.Equal((1800, 6000, 4200), startOnlyRange);
+
+            // Both -b and -e set
+            var bothRange = timeline.GetTickRange(new ChatRenderOptions { Framerate = 60, StartOverride = 20, EndOverride = 50 });
+            Assert.Equal((1200, 3000, 1800), bothRange);
+        }
+
+        [Fact]
+        public void StickyOverlayRenderer_TreatsResolvePendingPredictionAsLocked()
+        {
+            var options = new ChatRenderOptions
+            {
+                ChatWidth = 640,
+                ChatHeight = 1008,
+                BackgroundColor = new SKColor(0x33000000),
+                MessageColor = SKColors.White,
+                Font = "Inter Embedded",
+                FontSize = 24,
+                PredictionMode = OverlayWidgetMode.StickyTop
+            };
+
+            StickyPredictionOutcome[] outcomes =
+            [
+                new StickyPredictionOutcome("o1", "Yes", "BLUE", 1000, 2),
+                new StickyPredictionOutcome("o2", "No", "PINK", 500, 1)
+            ];
+
+            var lockedTracker = new StickyOverlayTracker(
+                [new PredictionOverlayEvent(10, false, "p1", "Test Pred", "LOCKED", 120, null, outcomes)],
+                options);
+            lockedTracker.AdvanceTo(15);
+
+            var pendingTracker = new StickyOverlayTracker(
+                [new PredictionOverlayEvent(10, false, "p1", "Test Pred", "RESOLVE_PENDING", 120, null, outcomes)],
+                options);
+            pendingTracker.AdvanceTo(15);
+
+            string tempDir = Path.Combine(Path.GetTempPath(), "ChatRenderPendingPredTest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+
+            try
+            {
+                using var layout = new TextLayoutEngine(options);
+                using var assets = new AssetCatalog(options, tempDir, layout.BaseOutlinePaint);
+                var renderer = new StickyOverlayRenderer(options, assets, layout);
+
+                using var lockedBmp = new SKBitmap(options.ChatWidth, options.ChatHeight);
+                using var lockedCanvas = new SKCanvas(lockedBmp);
+                lockedCanvas.Clear(options.BackgroundColor);
+                int lockedHeight = renderer.DrawStickyTopOverlays(lockedCanvas, lockedTracker, 15, layout.GetWorkerContext());
+                lockedCanvas.Flush();
+
+                using var pendingBmp = new SKBitmap(options.ChatWidth, options.ChatHeight);
+                using var pendingCanvas = new SKCanvas(pendingBmp);
+                pendingCanvas.Clear(options.BackgroundColor);
+                int pendingHeight = renderer.DrawStickyTopOverlays(pendingCanvas, pendingTracker, 15, layout.GetWorkerContext());
+                pendingCanvas.Flush();
+
+                Assert.True(lockedHeight > 0);
+                Assert.Equal(lockedHeight, pendingHeight);
+                Assert.Equal(lockedBmp.GetPixelSpan().ToArray(), pendingBmp.GetPixelSpan().ToArray());
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                }
+            }
+        }
     }
 }
